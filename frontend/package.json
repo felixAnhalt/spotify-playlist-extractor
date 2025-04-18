@@ -1,0 +1,14 @@
+{
+  "name": "spotify-playlist-extractor",
+  "version": "0.0.1",
+  "description": "A tool to extract Spotify playlists out of an existing one based on a given set of rules.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/felixAnhalt/spotify-playlist-extractor.git"
+  },
+  "private": true
+}
