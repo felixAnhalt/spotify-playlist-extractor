@@ -3,6 +3,7 @@
 // Initiates OAuth flow by calling backend login endpoint.
 
 import * as React from "react";
+import {login} from "../api/backendConnector";
 
 /**
  * Landing page component.
@@ -16,14 +17,9 @@ function LandingPage(): React.ReactElement {
   const handleLogin = async (): Promise<void> => {
     try {
       // Call backend login endpoint to get Spotify auth URL
-      const response = await fetch("/api/login", {
-        method: "GET",
-        credentials: "include",
-      });
-      if (!response.ok) throw new Error("Failed to initiate login");
-      const { redirect_url } = (await response.json()) as {
-        redirect_url: string;
-      };
+      const response = await login();
+      if (!response) throw new Error("Failed to initiate login");
+      const { redirect_url } = response.data
       window.location.href = redirect_url;
     } catch (err: any) {
       alert("Login failed: " + (err?.message ?? "Unknown error"));

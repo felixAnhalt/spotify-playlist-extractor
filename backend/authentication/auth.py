@@ -6,6 +6,7 @@ import secrets
 import base64
 import hashlib
 import os
+import httpx
 
 from config import config
 from authentication import session_store
@@ -60,7 +61,6 @@ async def callback(request: Request, code: str = None, state: str = None, error:
     if not code_verifier:
         return JSONResponse({"error": "Invalid state"}, status_code=status.HTTP_400_BAD_REQUEST)
     # Exchange code for tokens
-    import httpx
     data = {
         "client_id": config.SPOTIFY_CLIENT_ID,
         "grant_type": "authorization_code",
