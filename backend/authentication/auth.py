@@ -7,7 +7,8 @@ import base64
 import hashlib
 import os
 
-from . import config, session_store
+from config import config
+from authentication import session_store
 
 router = APIRouter()
 

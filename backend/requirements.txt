@@ -4,3 +4,5 @@ uvicorn
 scikit-learn
 # For OpenRouter/Gemini LLM API
 python-dotenv
+pytest
+numpy

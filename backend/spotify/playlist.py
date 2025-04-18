@@ -6,7 +6,13 @@ from fastapi import APIRouter, Request, HTTPException, status, Body
 from fastapi.responses import JSONResponse
 from typing import List, Dict, Any
 import httpx
-from . import session_store
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from collections import defaultdict
+import numpy as np
+
+from authentication import session_store
+from config.config import OPENROUTER_API_KEY, OPENROUTER_API_URL
 
 router = APIRouter()
 
@@ -153,11 +159,6 @@ async def create_playlists(request: Request):
             created.append({"name": name, "url": playlist_url})
     return JSONResponse({"created": created})
 
-# --- Clustering logic below ---
-
-from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import KMeans
-
 def normalize_audio_features(tracks: list, feature_keys: list) -> list:
     """
     Normalizes the specified audio features for all tracks using StandardScaler.
@@ -222,15 +223,6 @@ async def get_cluster_names(
 
     return JSONResponse({"cluster_ids": cluster_ids})
 
-# --- Cluster naming logic below ---
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
-
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
-
 async def get_cluster_vibe_name(cluster_features: dict, representative_tracks: list) -> str:
     """
     Calls Gemini LLM via OpenRouter API to generate a short, descriptive vibe name for a cluster.
@@ -268,8 +260,6 @@ def compute_cluster_averages(tracks: list, feature_keys: list, cluster_ids: list
     Computes average audio features and selects representative tracks for each cluster.
     Returns a dict: cluster_id -> {"features": avg_features, "tracks": [track, ...]}
     """
-    from collections import defaultdict
-    import numpy as np
     clusters = defaultdict(list)
     for idx, cid in enumerate(cluster_ids):
         clusters[cid].append(tracks[idx])
