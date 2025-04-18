@@ -32,6 +32,7 @@ async def login(request: Request):
     Initiates Spotify OAuth2 Authorization Code Flow with PKCE.
     Redirects user to Spotify's authorization endpoint.
     """
+    print("Starting Spotify OAuth2 login flow")
     code_verifier = generate_code_verifier()
     code_challenge = generate_code_challenge(code_verifier)
     state = secrets.token_urlsafe(16)
@@ -45,20 +46,27 @@ async def login(request: Request):
         "code_challenge_method": "S256",
         "code_challenge": code_challenge,
     }
-    url = f"https://accounts.spotify.com/authorize?{urlencode(params)}"
-    return RedirectResponse(url)
+    redirect_url = f"https://accounts.spotify.com/authorize?{urlencode(params)}"
+    print(f"Redirecting to Spotify: {redirect_url}")
+    body = { "redirect_url": redirect_url }
+    print(f"Redirecting to Spotify: {body}")
+    return JSONResponse(body)
 
 @router.get("/auth/callback")
 async def callback(request: Request, code: str = None, state: str = None, error: str = None):
     """
     Handles Spotify OAuth2 callback, exchanges code for tokens, and stores them in-memory.
     """
+    print(f"Starting Spotify OAuth2 callback flow: code={code}, state={state}, error={error}")
     if error:
+        print("OAuth2 callback error")
         return JSONResponse({"error": error}, status_code=status.HTTP_400_BAD_REQUEST)
     if not code or not state:
+        print(f"Missing code or state: code={code}, state={state}")
         return JSONResponse({"error": "Missing code or state"}, status_code=status.HTTP_400_BAD_REQUEST)
     code_verifier = session_store.get_code_verifier(state)
     if not code_verifier:
+        print(f"Invalid state: {code_verifier}")
         return JSONResponse({"error": "Invalid state"}, status_code=status.HTTP_400_BAD_REQUEST)
     # Exchange code for tokens
     data = {
@@ -69,6 +77,7 @@ async def callback(request: Request, code: str = None, state: str = None, error:
         "code_verifier": code_verifier,
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    print(f"Exchanging code for tokens: {data}")
     async with httpx.AsyncClient() as client:
         resp = await client.post("https://accounts.spotify.com/api/token", data=data, headers=headers)
     if resp.status_code != 200:

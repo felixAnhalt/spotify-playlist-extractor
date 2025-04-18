@@ -3,6 +3,7 @@
 
 import * as React from "react";
 import {useNavigate, useLocation} from "react-router";
+import {callback} from "../api/backendConnector";
 
 
 /**
@@ -21,11 +22,8 @@ function OAuthCallback(): React.ReactElement {
       try {
         // Notify backend with query params (e.g., code, state)
         const search = location.search;
-        const response = await fetch(`/api/callback${search}`, {
-          method: "GET",
-          credentials: "include",
-        });
-        if (!response.ok) throw new Error("OAuth callback failed");
+        const response = await callback(search);
+        if (!response) throw new Error("OAuth callback failed");
         // On success, redirect to logged-in confirmation
         navigate("/logged-in");
       } catch (err: any) {
