@@ -4,7 +4,7 @@
  * Passes playlists and discard pool as props to PlaylistEditor.
  */
 
-import React, { useState, useContext } from "react";
+import React, { useState } from "react";
 import {
   fetchPlaylistTracks,
   clusterTracks,
@@ -12,9 +12,7 @@ import {
   createPlaylists,
 } from "../api/backendConnector";
 import PlaylistEditor, { Playlist, DiscardPool, Song } from "./PlaylistEditor";
-
-// Example OAuth state context (replace with your actual context)
-const OAuthStateContext = React.createContext<{ state: string }>({ state: "" });
+import { useOAuthState } from "../auth/OAuthStateContext";
 
 /**
  * Modal component for feedback.
@@ -60,7 +58,7 @@ function Modal({
  * PlaylistEditorContainer component.
  */
 const PlaylistEditorContainer: React.FC = () => {
-  const { state } = useContext(OAuthStateContext);
+  const { state } = useOAuthState();
   const [playlistUrl, setPlaylistUrl] = useState("");
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [discardPool, setDiscardPool] = useState<DiscardPool>({ songs: [] });
@@ -73,6 +71,8 @@ const PlaylistEditorContainer: React.FC = () => {
     { name: string; url: string }[]
   >([]);
 
+  console.log("PlaylistEditorContainer: state", state);
+
   /**
    * Handles the full playlist organization flow.
    */
@@ -81,6 +81,7 @@ const PlaylistEditorContainer: React.FC = () => {
     setModal({ open: true, message: "Fetching playlist tracks..." });
     try {
       // 1. Fetch tracks and audio features
+      if (!state) throw new Error("Missing OAuth state. Please log in again.");
       const tracksResp = await fetchPlaylistTracks(playlistUrl, state);
       const tracksData = tracksResp.data.tracks;
 
@@ -141,6 +142,7 @@ const PlaylistEditorContainer: React.FC = () => {
           description: "",
           tracks: p.songs.filter((s) => s.selected).map((s) => s.id),
         }));
+      if (!state) throw new Error("Missing OAuth state. Please log in again.");
       const resp = await createPlaylists(selectedPlaylists, state);
       setCreatedLinks(resp.data.created || []);
       setModal({ open: true, message: "Playlists created successfully!" });
@@ -158,7 +160,7 @@ const PlaylistEditorContainer: React.FC = () => {
     <div>
       <Modal open={modal.open}>
         <div>
-          <p>{modal.message}</p>
+          <p style={{ color: "black" }}>{modal.message}</p>
           {!loading && createdLinks.length > 0 && (
             <div>
               <h3>Created Playlists:</h3>

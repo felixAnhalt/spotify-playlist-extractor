@@ -78,15 +78,28 @@ async def get_playlist_tracks(request: Request):
     playlist_id_or_url = body.get("playlist_id_or_url")
     state = body.get("state")
     if not playlist_id_or_url or not state:
+        print(f"Missing playlist_id_or_url or state: {playlist_id_or_url}, {state}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing playlist_id_or_url or state")
     tokens = session_store.get_tokens(state)
     if not tokens or "access_token" not in tokens:
+        print(f"No valid access token for state: {state}")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No valid access token for state")
     access_token = tokens["access_token"]
     playlist_id = extract_playlist_id(playlist_id_or_url)
+    print(f"Fetching tracks for playlist: {playlist_id} {access_token}")
     tracks = await fetch_all_tracks(access_token, playlist_id)
+    print(f"Fetched tracks for playlist: {len(tracks)}")
+    #tracks mapped to id, track name, [artist names]
+    track_collection = [{
+        "id": item["track"]["id"],
+        "name": item["track"]["name"],
+        "artists": [artist["name"] for artist in item["track"]["artists"]]
+    } for item in tracks if item.get("track") and item["track"].get("id")]
+    print(f"Fetched tracks for playlist: {track_collection}")
     track_ids = [item["track"]["id"] for item in tracks if item.get("track") and item["track"].get("id")]
+    print(f"Fetched track ids for playlist: {len(track_ids)}")
     audio_features = await fetch_audio_features(access_token, track_ids)
+    print(f"Fetched audio features for playlist: {len(audio_features)}")
     result = []
     for item in tracks:
         track = item.get("track")

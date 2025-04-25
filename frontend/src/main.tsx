@@ -5,12 +5,15 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
 import App from "./App";
+import {OAuthStateProvider} from "./auth/OAuthStateContext";
 
 /**
  * Renders the root React application with routing.
  */
 createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <App />
+      <OAuthStateProvider>
+          <App />
+      </OAuthStateProvider>
   </React.StrictMode>
 );

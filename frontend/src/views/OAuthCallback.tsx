@@ -2,9 +2,9 @@
 // Handles the OAuth callback from Spotify and redirects to the logged-in confirmation.
 
 import * as React from "react";
-import {useNavigate, useLocation} from "react-router";
-import {callback} from "../api/backendConnector";
-
+import { useNavigate, useLocation } from "react-router";
+import { callback } from "../api/backendConnector";
+import { useOAuthState } from "../auth/OAuthStateContext";
 
 /**
  * OAuthCallback component.
@@ -13,6 +13,7 @@ import {callback} from "../api/backendConnector";
 function OAuthCallback(): React.ReactElement {
   const navigate = useNavigate();
   const location = useLocation();
+  const { setState } = useOAuthState();
 
   React.useEffect(() => {
     /**
@@ -22,6 +23,11 @@ function OAuthCallback(): React.ReactElement {
       try {
         // Notify backend with query params (e.g., code, state)
         const search = location.search;
+        const state = new URLSearchParams(search).get("state");
+        if (state) {
+          setState(state);
+          localStorage.setItem("spotify_oauth_state", state);
+        }
         const response = await callback(search);
         if (!response) throw new Error("OAuth callback failed");
         // On success, redirect to logged-in confirmation
@@ -31,7 +37,7 @@ function OAuthCallback(): React.ReactElement {
       }
     }
     handleCallback();
-  }, [location.search, navigate]);
+  }, [location.search, navigate, setState]);
 
   return (
     <main
