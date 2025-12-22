@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import APIRouter, Request, Response, status
 from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.security import OAuth2AuthorizationCodeBearer
@@ -53,7 +54,7 @@ async def login(request: Request):
     return JSONResponse(body)
 
 @router.get("/auth/callback")
-async def callback(request: Request, code: str = None, state: str = None, error: str = None):
+async def callback(request: Request, code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
     """
     Handles Spotify OAuth2 callback, exchanges code for tokens, and stores them in-memory.
     """

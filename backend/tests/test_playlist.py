@@ -47,7 +47,7 @@ def test_playlist_cluster_missing_tracks():
     Test /playlist/cluster with missing tracks returns error.
     """
     response = client.post("/playlist/cluster", json={})
-    assert response.status_code == 400
+    assert response.status_code == 422
     assert "detail" in response.json()
 
 def test_create_playlists_flow(monkeypatch):
@@ -73,7 +73,7 @@ def test_create_playlists_flow(monkeypatch):
             return DummyResp(201, {})
         return DummyResp(404, {})
 
-    import backend.playlist as playlist_mod
+    import spotify.playlist as playlist_mod
     monkeypatch.setattr(playlist_mod.httpx.AsyncClient, "get", staticmethod(dummy_get))
     monkeypatch.setattr(playlist_mod.httpx.AsyncClient, "post", staticmethod(dummy_post))
 
@@ -95,10 +95,8 @@ def test_create_playlists_flow(monkeypatch):
     assert data["created"][0]["name"] == "Test Playlist"
     assert data["created"][0]["url"].startswith("https://open.spotify.com/playlist/")
 
-    assert "detail" in response.json()
 
-
-# NOTE: The following test disables due to missing response variable in test_create_playlists_flow.
+def test_playlist_cluster_names(monkeypatch):
     """
     Test /playlist/cluster-names returns names for valid input.
     """
@@ -112,7 +110,7 @@ def test_create_playlists_flow(monkeypatch):
     # Patch LLM call to avoid real API
     async def fake_get_cluster_vibe_name(features, reps):
         return "Test Vibe"
-    import backend.playlist as playlist_mod
+    import spotify.playlist as playlist_mod
     monkeypatch.setattr(playlist_mod, "get_cluster_vibe_name", fake_get_cluster_vibe_name)
     response = client.post("/playlist/cluster-names", json={"tracks": tracks, "cluster_ids": cluster_ids})
     assert response.status_code == 200
@@ -121,11 +119,10 @@ def test_create_playlists_flow(monkeypatch):
     assert set(data["cluster_names"].values()) == {"Test Vibe"}
 
 
-
-def test_playlist_cluster_names_missing(monkeypatch):
+def test_playlist_cluster_names_missing():
     """
     Test /playlist/cluster-names with missing params returns error.
     """
     response = client.post("/playlist/cluster-names", json={})
-    assert response.status_code == 400
+    assert response.status_code == 422
     assert "detail" in response.json()

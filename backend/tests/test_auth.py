@@ -10,11 +10,13 @@ client = TestClient(app)
 
 def test_login_redirect():
     """
-    Test that /auth/login redirects to Spotify authorization endpoint.
+    Test that /auth/login returns a JSON response with Spotify authorization URL.
     """
-    response = client.get("/auth/login", allow_redirects=False)
-    assert response.status_code == 307 or response.status_code == 302
-    assert "accounts.spotify.com/authorize" in response.headers["location"]
+    response = client.get("/auth/login")
+    assert response.status_code == 200
+    data = response.json()
+    assert "redirect_url" in data
+    assert "accounts.spotify.com/authorize" in data["redirect_url"]
 
 def test_callback_missing_params():
     """
