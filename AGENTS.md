@@ -26,3 +26,13 @@
 - Max 20 lines per method (logic). Separate concerns. No speculative abstractions.
 - Test with accessibility queries (`getByRole`, `getByLabelText`). Mock external dependencies.
 - Use `async`/`await` consistently. FastAPI endpoints always `async def`.
+
+Agents & rules:
+
+- **For bug reports**, invoke `@bug-hunter` to investigate and fix bugs by finding root causes, not just symptoms. The bug hunter will trace the issue, identify the underlying problem, and implement a proper fix.
+- **Start each feature** by invoking `@architect` to plan the implementation: identify files to change, steps to take, and potential issues.
+- **After making major code changes**, automatically invoke `@code-reviewer` to review modified changes for quality, correctness, security, and best practices.
+- **After code review passes**, automatically invoke `@quality-assurance` to run tests (`pnpm test`), lint (`pnpm run lint`), and build (`pnpm build`) — all must pass before the task is complete.
+- **Never skip QA** — always run quality-assurance after code changes, even for small changes.
+- If you need to search the codebase for patterns or understand architecture, use `@explore` for fast file/code searches.
+- **Never document something if not explicitly asked** — only provide documentation when requested.

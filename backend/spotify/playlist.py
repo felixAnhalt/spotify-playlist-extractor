@@ -6,13 +6,14 @@ from fastapi import APIRouter, Request, HTTPException, status, Body
 from fastapi.responses import JSONResponse
 from typing import List, Dict, Any
 import httpx
+import asyncio
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from collections import defaultdict
 import numpy as np
 
 from authentication import session_store
-from config.config import OPENROUTER_API_KEY, OPENROUTER_API_URL
+from config.config import OPENROUTER_API_KEY, OPENROUTER_API_URL, RECCOBEATS_API_BASE
 
 router = APIRouter()
 
@@ -48,23 +49,56 @@ async def fetch_all_tracks(access_token: str, playlist_id: str) -> List[Dict[str
 
 async def fetch_audio_features(access_token: str, track_ids: List[str]) -> Dict[str, Any]:
     """
-    Fetches audio features for a list of track IDs, batching requests to respect API limits.
+    Fetches audio features for a list of track IDs using Reccobeats API.
+    Batches requests (50 tracks per request) to be respectful of rate limits.
     Returns a dict mapping track ID to audio features.
+    Note: access_token parameter kept for backward compatibility but not used.
     """
     features = {}
-    headers = {"Authorization": f"Bearer {access_token}"}
-    async with httpx.AsyncClient() as client:
-        for i in range(0, len(track_ids), 100):
-            batch = track_ids[i:i+100]
+    batch_size = 50  # Conservative batch size to avoid overwhelming the API
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        for i in range(0, len(track_ids), batch_size):
+            batch = track_ids[i:i+batch_size]
             ids_param = ",".join(batch)
-            url = f"{SPOTIFY_API_BASE}/audio-features"
-            resp = await client.get(url, headers=headers, params={"ids": ids_param})
-            if resp.status_code != 200:
-                raise HTTPException(status_code=resp.status_code, detail="Failed to fetch audio features")
-            data = resp.json()
-            for af in data.get("audio_features", []):
-                if af and af.get("id"):
-                    features[af["id"]] = af
+            url = f"{RECCOBEATS_API_BASE}/audio-features"
+            
+            # Retry logic for rate limiting
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    resp = await client.get(url, params={"ids": ids_param})
+                    
+                    if resp.status_code == 429:  # Rate limited
+                        retry_after = int(resp.headers.get("Retry-After", 5))
+                        print(f"Rate limited. Waiting {retry_after} seconds before retry {attempt+1}/{max_retries}")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(retry_after)
+                            continue
+                        else:
+                            raise HTTPException(status_code=429, detail="Rate limit exceeded after retries")
+                    
+                    if resp.status_code != 200:
+                        print(f"Reccobeats API error: {resp.status_code} - {resp.text}")
+                        raise HTTPException(
+                            status_code=resp.status_code,
+                            detail=f"Failed to fetch audio features from Reccobeats: {resp.text}"
+                        )
+                    
+                    data = resp.json()
+                    # Reccobeats returns {"audio_features": [...]} similar to Spotify
+                    for af in data.get("audio_features", []):
+                        if af and af.get("id"):
+                            features[af["id"]] = af
+                    break  # Success, exit retry loop
+                    
+                except httpx.TimeoutException:
+                    print(f"Timeout on attempt {attempt+1}/{max_retries}")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(2)
+                        continue
+                    else:
+                        raise HTTPException(status_code=504, detail="Timeout fetching audio features")
+    
     return features
 
 @router.post("/playlist/tracks")
@@ -190,7 +224,7 @@ def cluster_tracks_kmeans(tracks: list, feature_keys: list, n_clusters: int = 4)
     Returns a list of cluster IDs corresponding to the input tracks.
     """
     X = normalize_audio_features(tracks, feature_keys)
-    kmeans = KMeans(n_clusters=n_clusters, n_init=10, random_state=42)
+    kmeans = KMeans(n_clusters=n_clusters, n_init='auto', random_state=42)
     return kmeans.fit_predict(X).tolist()
 
 @router.post("/playlist/cluster")
@@ -210,6 +244,7 @@ async def cluster_playlist_tracks(
     if not tracks or not isinstance(tracks, list):
         raise HTTPException(status_code=400, detail="Missing or invalid 'tracks' list")
     cluster_ids = cluster_tracks_kmeans(tracks, feature_keys, n_clusters)
+    return JSONResponse({"cluster_ids": cluster_ids})
 
 
 @router.post("/playlist/cluster-names")
@@ -233,8 +268,6 @@ async def get_cluster_names(
         name = await get_cluster_vibe_name(info["features"], info["tracks"])
         names[cid] = name
     return JSONResponse({"cluster_names": names})
-
-    return JSONResponse({"cluster_ids": cluster_ids})
 
 async def get_cluster_vibe_name(cluster_features: dict, representative_tracks: list) -> str:
     """

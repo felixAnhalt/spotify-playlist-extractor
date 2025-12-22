@@ -6,3 +6,4 @@ scikit-learn
 python-dotenv
 pytest
 numpy
+asyncio==4.0.0
