@@ -86,9 +86,15 @@ async def fetch_audio_features(access_token: str, track_ids: List[str]) -> Dict[
 
                     data = resp.json()
                     # Reccobeats returns {"content": [...]} not {"audio_features": [...]}
+                    # Each item has an internal UUID "id" but the Spotify ID is in the "href" URL
                     for af in data.get("content", []):
-                        if af and af.get("id"):
-                            features[af["id"]] = af
+                        if af and af.get("href"):
+                            # Extract Spotify track ID from href
+                            # href format: "https://open.spotify.com/track/{spotify_id}"
+                            href = af["href"]
+                            if "/track/" in href:
+                                spotify_id = href.split("/track/")[1].split("?")[0]
+                                features[spotify_id] = af
                     break  # Success, exit retry loop
 
                 except httpx.TimeoutException:
