@@ -11,8 +11,10 @@ import {
   getClusterNames,
   createPlaylists,
 } from "../api/backendConnector";
-import PlaylistEditor, { Playlist, DiscardPool, Song } from "./PlaylistEditor";
+import PlaylistEditor, { Playlist, DiscardPool } from "./PlaylistEditor";
 import { useOAuthState } from "../auth/OAuthStateContext";
+import Container from "../components/Container";
+import Button from "../components/Button";
 
 /**
  * Modal component for feedback.
@@ -26,28 +28,8 @@ function Modal({
 }) {
   if (!open) return null;
   return (
-    <div
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        width: "100vw",
-        height: "100vh",
-        background: "rgba(0,0,0,0.3)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-      }}
-    >
-      <div
-        style={{
-          background: "#fff",
-          padding: 32,
-          borderRadius: 8,
-          minWidth: 320,
-        }}
-      >
+    <div className="fixed inset-0 bg-neutral-900/30 backdrop-blur-sm flex items-center justify-center z-50">
+      <div className="bg-primary-50 p-8 rounded-xl min-w-80 max-w-md shadow-2xl border-primary-700 cartoon-card border-cartoon-3 shadow-cartoon">
         {children}
       </div>
     </div>
@@ -157,67 +139,104 @@ const PlaylistEditorContainer: React.FC = () => {
   };
 
   return (
-    <div>
+    <main className="min-h-screen bg-gradient-to-br from-primary-50 via-accent-50 to-secondary-100">
+      <Container>
+        <div className="flex flex-col items-center justify-center min-h-screen py-12">
+          {/* Header */}
+          <div className="text-center mb-12">
+            <div className="text-6xl mb-4 animate-bounce" style={{ animationDuration: '2s' }}>🎵</div>
+            <h1 className="text-5xl font-black text-primary-900 mb-6 font-mono-bold text-shadow-cartoon letter-spacing-cartoon-lg">
+              ORGANIZE YOUR PLAYLIST
+            </h1>
+            <p className="text-xl text-primary-800 max-w-2xl bg-primary-100 p-4 rounded-lg border-2 border-primary-700 font-medium shadow-cartoon-sm border-cartoon-2">
+              Enter your Spotify playlist URL or ID to start organizing your music by vibe, mood, and energy!
+            </p>
+          </div>
+
+          {/* Input Section */}
+          <div className="flex flex-col sm:flex-row gap-4 mb-8 w-full max-w-2xl">
+            <input
+              type="text"
+              placeholder="Enter Spotify playlist URL or ID"
+              value={playlistUrl}
+              onChange={(e) => setPlaylistUrl(e.target.value)}
+              className="flex-1 px-4 py-3 rounded-xl bg-primary-50 border-2 border-primary-700 text-primary-900 placeholder-primary-400 focus:outline-none focus:border-accent-500 focus:bg-white focus:ring-2 focus:ring-accent-200 transition-all cartoon-input font-medium font-mono shadow-cartoon-xs border-cartoon-2"
+              disabled={loading}
+            />
+            <Button
+              onClick={handleOrganize}
+              disabled={loading || !playlistUrl}
+              variant="spotify"
+              size="large"
+            >
+              {loading ? "PROCESSING..." : "ORGANIZE PLAYLIST"}
+            </Button>
+          </div>
+
+          {/* Playlist Editor */}
+          {playlists.length > 0 && (
+            <div className="w-full max-w-6xl">
+              <PlaylistEditor
+                initialPlaylists={playlists}
+                initialDiscardPool={discardPool}
+              />
+              <div className="flex justify-center mt-8">
+                <Button
+                  onClick={handleCreatePlaylists}
+                  disabled={loading}
+                  variant="spotify"
+                  size="large"
+                >
+                  {loading ? "Creating..." : "Create Playlists in Spotify"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      </Container>
+
+      {/* Modal */}
       <Modal open={modal.open}>
-        <div>
-          <p style={{ color: "black" }}>{modal.message}</p>
+        <div className="text-center">
+          <p className="text-neutral-700 mb-6">{modal.message}</p>
           {!loading && createdLinks.length > 0 && (
-            <div>
-              <h3>Created Playlists:</h3>
-              <ul>
+            <div className="text-left">
+              <h3 className="text-lg font-semibold text-neutral-800 mb-4">Created Playlists:</h3>
+              <ul className="space-y-2 mb-6">
                 {createdLinks.map((pl) => (
                   <li key={pl.url}>
-                    <a href={pl.url} target="_blank" rel="noopener noreferrer">
+                    <a
+                      href={pl.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary-500 hover:text-primary-600 underline transition-colors"
+                    >
                       {pl.name}
                     </a>
                   </li>
                 ))}
               </ul>
-              <button onClick={() => setModal({ open: false, message: "" })}>
+              <Button
+                onClick={() => setModal({ open: false, message: "" })}
+                variant="secondary"
+                size="medium"
+              >
                 Close
-              </button>
+              </Button>
             </div>
           )}
           {!loading && createdLinks.length === 0 && (
-            <button onClick={() => setModal({ open: false, message: "" })}>
+            <Button
+              onClick={() => setModal({ open: false, message: "" })}
+              variant="secondary"
+              size="medium"
+            >
               Close
-            </button>
+            </Button>
           )}
         </div>
       </Modal>
-      <div style={{ marginBottom: 24 }}>
-        <input
-          type="text"
-          placeholder="Enter Spotify playlist URL or ID"
-          value={playlistUrl}
-          onChange={(e) => setPlaylistUrl(e.target.value)}
-          style={{ width: 320, padding: 8, fontSize: "1em" }}
-          disabled={loading}
-        />
-        <button
-          onClick={handleOrganize}
-          disabled={loading || !playlistUrl}
-          style={{ marginLeft: 12 }}
-        >
-          Organize Playlist
-        </button>
-      </div>
-      {playlists.length > 0 && (
-        <div>
-          <PlaylistEditor
-            initialPlaylists={playlists}
-            initialDiscardPool={discardPool}
-          />
-          <button
-            onClick={handleCreatePlaylists}
-            disabled={loading}
-            style={{ marginTop: 24 }}
-          >
-            Create Playlists in Spotify
-          </button>
-        </div>
-      )}
-    </div>
+    </main>
   );
 };
 

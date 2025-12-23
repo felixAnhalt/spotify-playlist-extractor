@@ -293,7 +293,7 @@ async def get_cluster_vibe_name(cluster_features: dict, representative_tracks: l
 
     prompt = (
         "Given the following average audio features and a few representative tracks, "
-        "generate a short, creative, and descriptive 'vibe' name for this music cluster. "
+        "generate a short, creative, and descriptive 'vibe' name for this music cluster (this'll be the new playlists' name). "
         "Do not use the word 'cluster' or numbers. Keep it under 5 words.\n"
         f"Audio features: {cluster_features}\n"
         f"Representative tracks: {track_names}\n"
@@ -306,7 +306,7 @@ async def get_cluster_vibe_name(cluster_features: dict, representative_tracks: l
     data = {
         "model": "xiaomi/mimo-v2-flash:free",
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 20,
+        "max_tokens": 100,
         "temperature": 0.8
     }
     async with httpx.AsyncClient(timeout=30.0) as client:

@@ -1,68 +1,218 @@
-:root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+@import "tailwindcss";
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
+@theme {
+  /* Cuphead Vintage Palette - 1930s Cartoon Aesthetic */
+  
+  /* Primary - Tobacco & Sepia Tones (aged paper look) */
+  --color-primary-50: #F5E6D3;  /* Off-white/Cream - aged paper */
+  --color-primary-100: #E8D7C3; /* Light tobacco */
+  --color-primary-200: #D4A574; /* Classic tobacco yellow */
+  --color-primary-300: #C98B47; /* Muted orange */
+  --color-primary-400: #B87832; /* Warm orange-brown */
+  --color-primary-500: #8B6F47; /* Primary brown */
+  --color-primary-600: #7A5E3A; /* Darker brown */
+  --color-primary-700: #6A4F32; /* Deep brown */
+  --color-primary-800: #4A3C28; /* Charcoal brown */
+  --color-primary-900: #3C2828; /* Dark sepia */
+  
+  /* Secondary - Seafoam & Muted Greens (vintage cartoon) */
+  --color-secondary-50: #E8F4E8; /* Light seafoam */
+  --color-secondary-100: #D0E8D0; /* Soft mint */
+  --color-secondary-200: #A8C4A4; /* Classic seafoam green */
+  --color-secondary-300: #8BA88A; /* Muted sage */
+  --color-secondary-400: #7A8B7A; /* Dusty olive */
+  --color-secondary-500: #6A7A6A; /* Muted green */
+  --color-secondary-600: #5A6A5A; /* Darker sage */
+  --color-secondary-700: #4A5A4A; /* Deep olive */
+  --color-secondary-800: #3A4A3A; /* Dark olive */
+  --color-secondary-900: #2A3A2A; /* Deep forest */
+  
+  /* Accent - Vintage Pastels (faded cartoon colors) */
+  --color-accent-50: #F8E8E8; /* Light coral */
+  --color-accent-100: #F0D8D8; /* Soft pink */
+  --color-accent-200: #D4A5A5; /* Muted coral */
+  --color-accent-300: #C89090; /* Dusty rose */
+  --color-accent-400: #B88080; /* Muted red */
+  --color-accent-500: #A87070; /* Vintage red */
+  --color-accent-600: #906060; /* Darker coral */
+  --color-accent-700: #785050; /* Dusty red */
+  --color-accent-800: #604040; /* Dark red-brown */
+  --color-accent-900: #483030; /* Deep red */
+  
+  /* Neutral - Vintage Grays & Blacks (film stock look) */
+  --color-neutral-50: #FAF8F5; /* Vintage off-white */
+  --color-neutral-100: #F0E8E0; /* Aged ivory */
+  --color-neutral-200: #E0D8D0; /* Dusty cream */
+  --color-neutral-300: #C8B8A8; /* Vintage beige */
+  --color-neutral-400: #B0A090; /* Muted tan */
+  --color-neutral-500: #908070; /* Vintage gray */
+  --color-neutral-600: #706050; /* Darker gray-brown */
+  --color-neutral-700: #504030; /* Dark vintage */
+  --color-neutral-800: #403020; /* Very dark brown */
+  --color-neutral-900: #2A1F1F; /* Vintage black */
+  
+  /* Cartoon-specific colors */
+  --color-cartoon-shadow: rgba(74, 60, 40, 0.3);
+  --color-cartoon-highlight: rgba(245, 230, 211, 0.8);
+  --color-cartoon-outline: #2A1F1F;
+  
+  --font-sans: system-ui, Avenir, Helvetica, Arial, sans-serif;
 }
 
 body {
   margin: 0;
-  display: flex;
-  place-items: center;
   min-width: 320px;
   min-height: 100vh;
 }
 
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
+/* Cuphead Cartoon Utility Classes */
+@layer utilities {
+  .cartoon-button {
+    transition: all 0.2s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+    animation: cartoonBounce 2s ease-in-out infinite;
+    animation-play-state: paused;
+  }
+
+  .cartoon-button:hover {
+    animation-play-state: running;
+  }
+
+  .cartoon-button-base {
+    border-style: solid;
+    position: relative;
+    background-image: 
+      linear-gradient(45deg, transparent 40%, rgba(255,255,255,0.3) 50%, transparent 60%),
+      linear-gradient(-45deg, transparent 40%, rgba(0,0,0,0.1) 50%, transparent 60%);
+  }
+
+  .cartoon-button-base::before {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: -2px;
+    right: -2px;
+    bottom: -2px;
+    background: linear-gradient(45deg, rgba(255,255,255,0.5), transparent, rgba(0,0,0,0.1));
+    z-index: -1;
+    border-radius: inherit;
+  }
+
+  .cartoon-input {
+    transition: all 0.2s ease;
+  }
+
+  .cartoon-input:focus {
+    transform: scale(1.02);
+  }
+
+  .cartoon-song {
+    transition: all 0.15s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  }
+
+  .cartoon-song:hover {
+    transform: rotate(-1deg) scale(1.02);
+  }
+
+  /* Custom utility classes for inline style replacements */
+  .font-mono-bold {
+    font-family: monospace;
+    font-weight: 900;
+  }
+
+  .text-shadow-cartoon {
+    text-shadow: 3px 3px 0px rgba(74, 60, 40, 0.3);
+  }
+
+  .text-shadow-cartoon-sm {
+    text-shadow: 2px 2px 0px rgba(74, 60, 40, 0.3);
+  }
+
+  .border-cartoon-3 {
+    border-style: solid;
+    border-width: 3px;
+  }
+
+  .border-cartoon-2 {
+    border-style: solid;
+    border-width: 2px;
+  }
+
+  .shadow-cartoon {
+    box-shadow: 4px 4px 0px rgba(74, 60, 40, 0.6);
+  }
+
+  .shadow-cartoon-sm {
+    box-shadow: 3px 3px 0px rgba(74, 60, 40, 0.5);
+  }
+
+  .shadow-cartoon-xs {
+    box-shadow: 2px 2px 0px rgba(74, 60, 40, 0.4);
+  }
+
+  .shadow-cartoon-song {
+    box-shadow: 2px 2px 0px rgba(74, 60, 40, 0.3);
+  }
+
+  .bg-primary-50-opacity {
+    background-color: rgba(245, 230, 211, 0.8);
+  }
+
+  .bg-accent-200-opacity {
+    background-color: rgba(212, 165, 116, 0.2);
+  }
+
+  .letter-spacing-cartoon {
+    letter-spacing: 0.0625rem; /* 1px */
+  }
+
+  .letter-spacing-cartoon-lg {
+    letter-spacing: 0.125rem; /* 2px */
+  }
+
+  .animate-bounce-slow {
+    animation-duration: 2s;
+  }
+
+  .animate-bounce-slower {
+    animation-duration: 3s;
+  }
 }
 
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+@keyframes cartoonBounce {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  25% { transform: translateY(-2px) rotate(-1deg); }
+  75% { transform: translateY(-1px) rotate(1deg); }
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
+/* Vintage film grain effect */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0,0,0,0.03) 0px,
+    transparent 1px,
+    transparent 2px,
+    rgba(0,0,0,0.03) 3px
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+.cartoon-card {
+  animation: cardFloat 3s ease-in-out infinite;
+  animation-play-state: paused;
+}
+
+.cartoon-card:hover {
+  animation-play-state: running;
+}
+
+@keyframes cardFloat {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-3px) rotate(0.5deg); }
 }

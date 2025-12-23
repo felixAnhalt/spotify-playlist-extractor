@@ -14,6 +14,8 @@
 - **Naming**: PascalCase components/interfaces, camelCase functions/vars, UPPER_SNAKE_CASE constants
 - **Components**: Presentational use props, containers use hooks/context. State → handlers → JSX.
 - **Error handling**: `try-catch` with `err: any`, optional chaining (`?.`), user-facing alerts
+- **The project uses Tailwind v4 for styling. DO NOT USE ANY v3 RELATED styling!**
+- **Seldom use inline styles. Prefer Tailwind classes.**
 
 ### Python/FastAPI
 - **Imports**: (1) stdlib, (2) FastAPI/third-party, (3) local relative imports
@@ -35,4 +37,5 @@ Agents & rules:
 - **After code review passes**, automatically invoke `@quality-assurance` to run tests (`pnpm test`), lint (`pnpm run lint`), and build (`pnpm build`) — all must pass before the task is complete.
 - **Never skip QA** — always run quality-assurance after code changes, even for small changes.
 - If you need to search the codebase for patterns or understand architecture, use `@explore` for fast file/code searches.
+- **For creating OpenCode skills**, invoke `@skill-contributor` to create skills or identify skill opportunities using `@explore`.
 - **Never document something if not explicitly asked** — only provide documentation when requested.
