@@ -1,11 +1,11 @@
 ---
 name: atomic-components
-description: Create atomic design components (atoms, molecules, organisms) following React/TypeScript best practices with Tailwind v4 styling. Use when creating or refactoring UI components in React projects, especially when building design systems or component libraries. Triggers on requests like "create a button component", "add atomic component", "build reusable UI elements", or "follow atomic design principles".
+description: Create atomic components (atoms) - basic, reusable UI building blocks following React/TypeScript best practices with Tailwind v4 styling. Use when creating fundamental UI elements like buttons, inputs, labels, icons, or other single-responsibility components. Triggers on requests like "create a button component", "add an input atom", "build a reusable icon wrapper", or "create atomic UI elements".
 ---
 
 # Atomic Components
 
-Create reusable UI components following atomic design principles with proper TypeScript interfaces and Tailwind v4 styling.
+Create atomic components (atoms) - the fundamental building blocks of your UI with proper TypeScript interfaces and Tailwind v4 styling.
 
 ## Component Structure Template
 
@@ -28,12 +28,12 @@ export interface ComponentNameProps {
  * ComponentName component.
  * Detailed description of what it does.
  */
-function ComponentName({
+export const ComponentName = ({
   children,
   variant = "primary",
   size = "medium",
   disabled = false,
-}: ComponentNameProps): ReactElement {
+}: ComponentNameProps): ReactElement => {
   // 1. Local state (if needed)
   const [isActive, setIsActive] = useState(false);
 
@@ -83,67 +83,45 @@ function ComponentName({
 export default ComponentName;
 ```
 
-## Atomic Design Levels
+## What Are Atoms?
 
-### Atoms
-Basic building blocks (Button, Input, Label, Icon)
+Atoms are the basic building blocks of your UI - fundamental, reusable components with single responsibility.
 
 **Characteristics:**
-- Single responsibility
+- Single responsibility (one thing, well)
 - No dependencies on other components
-- Highly reusable
+- Highly reusable across the application
 - Minimal props (typically 3-7)
+- Pure presentational logic
 
-**Examples:**
+**Common Examples:**
 - Button with variants (primary, secondary, disabled states)
 - Input field with validation states
-- Typography components (Heading, Paragraph)
+- Typography components (Heading, Paragraph, Label)
 - Icon wrapper
+- Card container
+- Container layout
 
-### Molecules
-Simple component combinations (FormField = Label + Input + Error)
-
-**Characteristics:**
-- Compose 2-4 atoms
-- Single cohesive purpose
-- Can manage internal state
-- Props interface for customization
-
-**Examples:**
-- SearchBox (Input + Button)
-- FormField (Label + Input + ErrorText)
-- IconButton (Icon + Button)
-
-### Organisms
-Complex UI sections (Header, Card, Form)
-
-**Characteristics:**
-- Compose atoms, molecules, and other organisms
-- May contain business logic
-- Often connect to state management
-- More specific to application context
-
-**Examples:**
-- NavigationBar (Logo + Navigation + UserMenu)
-- PlaylistCard (Image + Title + Description + Actions)
-- LoginForm (FormFields + Buttons + validation logic)
+**Not Atoms** (compose atoms instead):
+- FormField (Label + Input + Error) → compose atoms into a molecule
+- SearchBox (Input + Button) → compose atoms into a molecule
+- NavigationBar (multiple atoms + logic) → compose atoms into an organism
 
 ## Code Style Requirements
 
 ### Import Order
-1. React
+1. React (named imports)
 2. Third-party libraries
 3. Router/navigation
 4. Local API/utils
-5. Components (atoms → molecules → organisms)
+5. Components
 6. Context/state
 
 ```typescript
-import { ReactNode } as React from "react";
+import { ReactNode, useState } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { formatDate } from "../utils/dates";
-import Button from "./Button";
 import { useAuth } from "../context/AuthContext";
 ```
 
@@ -155,7 +133,7 @@ import { useAuth } from "../context/AuthContext";
 
 ```typescript
 export interface ButtonProps {
-  children: React.ReactNode;
+  children: ReactNode;
   onClick?: () => void;
   variant?: "primary" | "secondary" | "spotify";
   size?: "small" | "medium" | "large";
@@ -181,7 +159,7 @@ export interface ComponentProps { }
  * ComponentName brief description.
  * Longer description if needed.
  */
-function ComponentName(props: ComponentProps): ReactElement {
+export const ComponentName = (props: ComponentProps): ReactElement => {
   // 3. State declarations
   const [state, setState] = useState();
   
@@ -234,18 +212,18 @@ const baseClasses = `
 ```
 
 ### Avoid v3 Patterns
-Tailwind v4 Guidelines (vs v3)
-•	Avoid v3-era abstraction patterns
-•	Don’t use @apply as a component or styling system (escape hatch only).
-•	Don’t use theme() — Tailwind v4 exposes design tokens via CSS variables.
-•	Don’t over-invest in tailwind.config.js; v4 is CSS-first, config is optional.
-•	Preferred v4 approach
-•	Use utility classes directly in markup.
-•	Use framework components (React/Vue/etc.) for reuse, not CSS abstraction.
-•	Use CSS variables for theming and tokens when needed.
+**Tailwind v4 Guidelines (vs v3):**
+- Avoid v3-era abstraction patterns
+- Don't use `@apply` as a component or styling system (escape hatch only)
+- Don't use `theme()` — Tailwind v4 exposes design tokens via CSS variables
+- Don't over-invest in `tailwind.config.js`; v4 is CSS-first, config is optional
 
-Rule of thumb:
-If you’re writing CSS to avoid utilities, you’re probably fighting Tailwind v4.
+**Preferred v4 approach:**
+- Use utility classes directly in markup
+- Use React components for reuse, not CSS abstraction
+- Use CSS variables for theming when needed
+
+**Rule of thumb:** If you're writing CSS to avoid utilities, you're fighting Tailwind v4.
 
 ## Error Handling & Accessibility
 
@@ -278,11 +256,10 @@ try {
 
 ## Quick Reference
 
-### File Naming
+### File Naming & Organization
 - `ComponentName.tsx` (PascalCase)
-- Place atoms in `components/atoms/`
-- Place molecules in `components/molecules/`
-- Place organisms in `components/organisms/`
+- Place in `components/` or `components/atoms/` directory
+- One component per file
 
 ### Component Checklist
 - [ ] Props interface exported
@@ -298,7 +275,7 @@ Keep logic methods under 20 lines. Extract helpers if needed:
 
 ```typescript
 // Bad: 30-line render method with complex logic
-function Component() {
+export const Component = () => {
   return (
     <div>
       {/* 30 lines of conditional rendering */}
@@ -307,11 +284,11 @@ function Component() {
 }
 
 // Good: Extracted to helper
-function Component() {
+export const Component = () => {
   return <div>{renderContent()}</div>;
 }
 
-function renderContent(): React.ReactElement {
+function renderContent(): ReactElement {
   // Complex logic extracted
 }
 ```
