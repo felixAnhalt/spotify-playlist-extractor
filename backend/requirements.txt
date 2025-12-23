@@ -1,0 +1,9 @@
+fastapi
+httpx
+uvicorn
+scikit-learn
+# For OpenRouter/Gemini LLM API
+python-dotenv
+pytest
+numpy
+asyncio==4.0.0
