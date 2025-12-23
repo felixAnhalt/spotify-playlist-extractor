@@ -126,3 +126,108 @@ def test_playlist_cluster_names_missing():
     response = client.post("/playlist/cluster-names", json={})
     assert response.status_code == 422
     assert "detail" in response.json()
+
+
+def test_fetch_audio_features_reccobeats_schema(monkeypatch):
+    """
+    Test that fetch_audio_features correctly parses ReccoBeats API response schema.
+    ReccoBeats returns {"content": [...]} not {"audio_features": [...]}.
+    """
+    import spotify.playlist as playlist_mod
+    
+    # Mock ReccoBeats response with correct schema
+    reccobeats_response = {
+        "content": [
+            {
+                "id": "track1",
+                "href": "https://open.spotify.com/track/track1",
+                "isrc": "USRC12345678",
+                "acousticness": 0.123,
+                "danceability": 0.456,
+                "energy": 0.789,
+                "instrumentalness": 0.012,
+                "key": 5,
+                "liveness": 0.234,
+                "loudness": -5.5,
+                "mode": 1,
+                "speechiness": 0.067,
+                "tempo": 120.5,
+                "valence": 0.678
+            },
+            {
+                "id": "track2",
+                "href": "https://open.spotify.com/track/track2",
+                "isrc": "USRC87654321",
+                "acousticness": 0.321,
+                "danceability": 0.654,
+                "energy": 0.987,
+                "instrumentalness": 0.210,
+                "key": 7,
+                "liveness": 0.432,
+                "loudness": -6.2,
+                "mode": 0,
+                "speechiness": 0.089,
+                "tempo": 128.3,
+                "valence": 0.876
+            }
+        ]
+    }
+    
+    class DummyResp:
+        def __init__(self, status_code, json_data):
+            self.status_code = status_code
+            self._json = json_data
+            self.headers = {}
+        def json(self):
+            return self._json
+    
+    async def dummy_get(url, params=None, headers=None):
+        return DummyResp(200, reccobeats_response)
+    
+    class DummyClient:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+        async def get(self, url, params=None):
+            return await dummy_get(url, params)
+    
+    monkeypatch.setattr(playlist_mod.httpx, "AsyncClient", lambda timeout=None: DummyClient())
+    
+    import asyncio
+    features = asyncio.run(playlist_mod.fetch_audio_features("fake_token", ["track1", "track2"]))
+    
+    # Verify features were extracted correctly
+    assert "track1" in features
+    assert "track2" in features
+    assert features["track1"]["acousticness"] == 0.123
+    assert features["track1"]["danceability"] == 0.456
+    assert features["track2"]["tempo"] == 128.3
+    assert features["track2"]["valence"] == 0.876
+
+
+def test_compute_cluster_averages_handles_none_features():
+    """
+    Test that compute_cluster_averages handles tracks with None audio_features gracefully.
+    """
+    import spotify.playlist as playlist_mod
+    
+    tracks = [
+        {"name": "Track A", "audio_features": {"danceability": 0.5, "energy": 0.7}},
+        {"name": "Track B", "audio_features": None},  # Missing features
+        {"name": "Track C", "audio_features": {"danceability": 0.8, "energy": 0.9}},
+    ]
+    cluster_ids = [0, 0, 1]
+    feature_keys = ["danceability", "energy"]
+    
+    # Should not raise AttributeError
+    result = playlist_mod.compute_cluster_averages(tracks, feature_keys, cluster_ids)
+    
+    assert 0 in result
+    assert 1 in result
+    # Cluster 0 has Track A (valid) and Track B (None) - should average with 0.0 for missing
+    assert result[0]["features"]["danceability"] == pytest.approx(0.25, abs=0.01)  # (0.5 + 0.0) / 2
+    assert result[0]["features"]["energy"] == pytest.approx(0.35, abs=0.01)  # (0.7 + 0.0) / 2
+    # Cluster 1 has Track C
+    assert result[1]["features"]["danceability"] == pytest.approx(0.8, abs=0.01)
+    assert result[1]["features"]["energy"] == pytest.approx(0.9, abs=0.01)

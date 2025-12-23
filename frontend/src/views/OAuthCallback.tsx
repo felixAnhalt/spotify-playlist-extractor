@@ -14,12 +14,16 @@ function OAuthCallback(): React.ReactElement {
   const navigate = useNavigate();
   const location = useLocation();
   const { setState } = useOAuthState();
+  const hasRun = React.useRef(false);
 
   React.useEffect(() => {
     /**
      * Handles the OAuth callback by notifying the backend and redirecting.
      */
     async function handleCallback(): Promise<void> {
+      if (hasRun.current) return;
+      hasRun.current = true;
+
       try {
         // Notify backend with query params (e.g., code, state)
         const search = location.search;

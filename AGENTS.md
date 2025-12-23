@@ -1,10 +1,10 @@
 # Agent Guidelines - Spotify Playlist Extractor
 
 ## Commands
-- **Frontend dev**: `cd frontend && npm run dev` | **build**: `npm run build` | **lint**: `npm run lint`
+- **Frontend dev**: `cd frontend && pnpm run dev` | **build**: `pnpm run build` | **lint**: `pnpm run lint`
 - **Backend dev**: `cd backend && ./start.sh` or `uvicorn main:app --reload`
 - **Test backend**: `cd backend && pytest` | **single test**: `pytest tests/test_auth.py::test_login_redirect`
-- **Test frontend**: No npm script configured. Run tests with `npx vitest` if needed.
+- **Test frontend**: No pnpmscript configured. Run tests with `npx vitest` if needed.
 
 ## Code Style
 

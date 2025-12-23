@@ -16,3 +16,7 @@ RECCOBEATS_API_BASE = "https://api.reccobeats.com/v1"
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "your_spotify_client_id")
 SPOTIFY_REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI", "http://localhost:8000/auth/callback")
 SPOTIFY_SCOPE = "user-read-private user-read-email"
+
+# Environment detection
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+IS_LOCAL = ENVIRONMENT == "development"

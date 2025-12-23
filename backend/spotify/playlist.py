@@ -55,19 +55,19 @@ async def fetch_audio_features(access_token: str, track_ids: List[str]) -> Dict[
     Note: access_token parameter kept for backward compatibility but not used.
     """
     features = {}
-    batch_size = 50  # Conservative batch size to avoid overwhelming the API
+    batch_size = 40  # Conservative batch size to avoid overwhelming the API
     async with httpx.AsyncClient(timeout=30.0) as client:
         for i in range(0, len(track_ids), batch_size):
             batch = track_ids[i:i+batch_size]
             ids_param = ",".join(batch)
             url = f"{RECCOBEATS_API_BASE}/audio-features"
-            
+
             # Retry logic for rate limiting
             max_retries = 3
             for attempt in range(max_retries):
                 try:
                     resp = await client.get(url, params={"ids": ids_param})
-                    
+
                     if resp.status_code == 429:  # Rate limited
                         retry_after = int(resp.headers.get("Retry-After", 5))
                         print(f"Rate limited. Waiting {retry_after} seconds before retry {attempt+1}/{max_retries}")
@@ -76,21 +76,21 @@ async def fetch_audio_features(access_token: str, track_ids: List[str]) -> Dict[
                             continue
                         else:
                             raise HTTPException(status_code=429, detail="Rate limit exceeded after retries")
-                    
+
                     if resp.status_code != 200:
                         print(f"Reccobeats API error: {resp.status_code} - {resp.text}")
                         raise HTTPException(
                             status_code=resp.status_code,
                             detail=f"Failed to fetch audio features from Reccobeats: {resp.text}"
                         )
-                    
+
                     data = resp.json()
-                    # Reccobeats returns {"audio_features": [...]} similar to Spotify
-                    for af in data.get("audio_features", []):
+                    # Reccobeats returns {"content": [...]} not {"audio_features": [...]}
+                    for af in data.get("content", []):
                         if af and af.get("id"):
                             features[af["id"]] = af
                     break  # Success, exit retry loop
-                    
+
                 except httpx.TimeoutException:
                     print(f"Timeout on attempt {attempt+1}/{max_retries}")
                     if attempt < max_retries - 1:
@@ -98,7 +98,7 @@ async def fetch_audio_features(access_token: str, track_ids: List[str]) -> Dict[
                         continue
                     else:
                         raise HTTPException(status_code=504, detail="Timeout fetching audio features")
-    
+
     return features
 
 @router.post("/playlist/tracks")
@@ -275,12 +275,22 @@ async def get_cluster_vibe_name(cluster_features: dict, representative_tracks: l
     """
     if not OPENROUTER_API_KEY:
         raise RuntimeError("OPENROUTER_API_KEY not set in environment.")
+
+    # Extract track names - handle both nested track objects and flat dicts
+    track_names = []
+    for t in representative_tracks:
+        if isinstance(t, dict):
+            if "track" in t and isinstance(t["track"], dict):
+                track_names.append(t["track"].get("name", "Unknown"))
+            else:
+                track_names.append(t.get("name", "Unknown"))
+
     prompt = (
         "Given the following average audio features and a few representative tracks, "
         "generate a short, creative, and descriptive 'vibe' name for this music cluster. "
         "Do not use the word 'cluster' or numbers. Keep it under 5 words.\n"
         f"Audio features: {cluster_features}\n"
-        f"Representative tracks: {[t['name'] for t in representative_tracks]}\n"
+        f"Representative tracks: {track_names}\n"
         "Name:"
     )
     headers = {
@@ -288,14 +298,15 @@ async def get_cluster_vibe_name(cluster_features: dict, representative_tracks: l
         "Content-Type": "application/json"
     }
     data = {
-        "model": "google/gemini-pro",
+        "model": "xiaomi/mimo-v2-flash:free",
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 16,
-        "temperature": 0.7
+        "max_tokens": 20,
+        "temperature": 0.8
     }
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(OPENROUTER_API_URL, headers=headers, json=data)
         if resp.status_code != 200:
+            print(f"LLM API error: {resp.status_code} - {resp.text}")
             raise HTTPException(status_code=500, detail="Failed to get cluster name from LLM")
         result = resp.json()
         return result["choices"][0]["message"]["content"].strip()
@@ -311,7 +322,14 @@ def compute_cluster_averages(tracks: list, feature_keys: list, cluster_ids: list
         clusters[cid].append(tracks[idx])
     result = {}
     for cid, tlist in clusters.items():
-        feats = [ [t.get("audio_features", {}).get(k, 0.0) for k in feature_keys] for t in tlist ]
+        feats = []
+        for t in tlist:
+            af = t.get("audio_features")
+            if af is None:
+                # Handle missing audio features with zeros
+                feats.append([0.0 for _ in feature_keys])
+            else:
+                feats.append([af.get(k, 0.0) for k in feature_keys])
         avg = dict(zip(feature_keys, np.mean(feats, axis=0)))
         reps = tlist[:3]  # first 3 as representatives
         result[cid] = {"features": avg, "tracks": reps}
