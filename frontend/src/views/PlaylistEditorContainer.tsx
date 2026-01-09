@@ -42,7 +42,6 @@ function Modal({
 const PlaylistEditorContainer: React.FC = () => {
   const { state } = useOAuthState();
   const [playlistUrl, setPlaylistUrl] = useState("");
-  const [nClusters, setNClusters] = useState(4);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [discardPool, setDiscardPool] = useState<DiscardPool>({ songs: [] });
   const [loading, setLoading] = useState(false);
@@ -69,8 +68,8 @@ const PlaylistEditorContainer: React.FC = () => {
       const tracksData = tracksResp.data.tracks;
 
       setModal({ open: true, message: "Clustering tracks by vibe..." });
-      // 2. Cluster tracks
-      const clusterResp = await clusterTracks(tracksData, nClusters);
+      // 2. Cluster tracks (n_clusters determined automatically by backend)
+      const clusterResp = await clusterTracks(tracksData);
       const clusterIds = clusterResp.data.cluster_ids;
 
       setModal({ open: true, message: "Naming clusters..." });
@@ -162,16 +161,6 @@ const PlaylistEditorContainer: React.FC = () => {
               value={playlistUrl}
               onChange={(e) => setPlaylistUrl(e.target.value)}
               className="flex-1 px-4 py-3 rounded-xl bg-primary-50 border-2 border-primary-700 text-primary-900 placeholder-primary-400 focus:outline-none focus:border-accent-500 focus:bg-white focus:ring-2 focus:ring-accent-200 transition-all cartoon-input font-medium font-mono shadow-cartoon-xs border-cartoon-2"
-              disabled={loading}
-            />
-            <input
-              type="number"
-              placeholder="Clusters"
-              min="1"
-              max="20"
-              value={nClusters}
-              onChange={(e) => setNClusters(Math.max(1, Math.min(20, parseInt(e.target.value) || 4)))}
-              className="w-24 px-4 py-3 rounded-xl bg-primary-50 border-2 border-primary-700 text-primary-900 placeholder-primary-400 focus:outline-none focus:border-accent-500 focus:bg-white focus:ring-2 focus:ring-accent-200 transition-all cartoon-input font-medium font-mono shadow-cartoon-xs border-cartoon-2 text-center"
               disabled={loading}
             />
             <Button

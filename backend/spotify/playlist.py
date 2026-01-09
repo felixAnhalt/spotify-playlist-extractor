@@ -9,6 +9,7 @@ import httpx
 import asyncio
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
+from sklearn.metrics import davies_bouldin_score
 from collections import defaultdict
 import numpy as np
 
@@ -227,6 +228,84 @@ def normalize_audio_features(tracks: list, feature_keys: list) -> list:
     scaler = StandardScaler()
     return scaler.fit_transform(features)
 
+def determine_optimal_clusters(tracks: list, feature_keys: list, min_clusters: int = 3, max_clusters: int = 15) -> int:
+    """
+    Determines the optimal number of clusters using a hybrid approach:
+    1. Elbow method with inertia (within-cluster sum of squares)
+    2. Davies-Bouldin score (lower is better - ratio of within to between cluster distances)
+    3. Size-based heuristics for reasonable bounds
+
+    Args:
+        tracks: List of track objects with audio_features
+        feature_keys: List of audio feature keys to use for clustering
+        min_clusters: Minimum number of clusters to test (default: 3)
+        max_clusters: Maximum number of clusters to test (default: 12)
+
+    Returns:
+        Optimal number of clusters
+    """
+    X = normalize_audio_features(tracks, feature_keys)
+    n_samples = len(X)
+
+    # Edge cases
+    if n_samples < 2:
+        return 1
+    if n_samples < min_clusters:
+        return max(2, min(n_samples, 3))
+
+    print(f"Playlist size: {n_samples} tracks. Testing {min_clusters}-{max_clusters} clusters")
+
+    inertias = []
+    db_scores = []
+    k_range = range(min_clusters, max_clusters + 1)
+
+    # Test different cluster counts
+    for k in k_range:
+        try:
+            kmeans = KMeans(n_clusters=k, n_init='auto', random_state=42)
+            labels = kmeans.fit_predict(X)
+
+            # Calculate metrics
+            inertia = kmeans.inertia_
+            db_score = davies_bouldin_score(X, labels)
+
+            inertias.append(inertia)
+            db_scores.append(db_score)
+
+            print(f"k={k}: inertia={inertia:.2f}, davies_bouldin={db_score:.3f}")
+        except Exception as e:
+            print(f"Error testing k={k}: {e}")
+            inertias.append(float('inf'))
+            db_scores.append(float('inf'))
+
+    # Find elbow point using rate of change
+    best_k = min_clusters
+    if len(inertias) > 2:
+        # Calculate rate of decrease in inertia
+        deltas = [inertias[i] - inertias[i+1] for i in range(len(inertias)-1)]
+        # Calculate second derivative (rate of change of rate of change)
+        second_deltas = [deltas[i] - deltas[i+1] for i in range(len(deltas)-1)]
+
+        # Find elbow: where improvement rate drops significantly
+        # Combined with Davies-Bouldin score (lower is better)
+        scores = []
+        for i in range(len(second_deltas)):
+            k = min_clusters + i + 1
+            idx = i + 1
+            # Normalize metrics (lower is better for both)
+            # Weight: 60% elbow sharpness, 40% cluster quality
+            elbow_score = second_deltas[i] if second_deltas[i] > 0 else 0
+            db_normalized = 1.0 / (1.0 + db_scores[idx]) if db_scores[idx] != float('inf') else 0
+            combined_score = 0.6 * elbow_score + 0.4 * db_normalized
+            scores.append((k, combined_score))
+            print(f"k={k}: combined_score={combined_score:.3f} (elbow={elbow_score:.3f}, db_norm={db_normalized:.3f})")
+
+        if scores:
+            best_k = max(scores, key=lambda x: x[1])[0]
+
+    print(f"Optimal number of clusters: {best_k}")
+    return best_k
+
 def cluster_tracks_kmeans(tracks: list, feature_keys: list, n_clusters: int = 4) -> list:
     """
     Clusters tracks using KMeans on the specified audio features.
@@ -239,11 +318,12 @@ def cluster_tracks_kmeans(tracks: list, feature_keys: list, n_clusters: int = 4)
 @router.post("/playlist/cluster")
 async def cluster_playlist_tracks(
     tracks: list = Body(..., embed=True),
-    n_clusters: int = Body(4, embed=True)
+    n_clusters: int = Body(None, embed=True)
 ):
     """
     Accepts a JSON body with 'tracks' (list of track dicts with audio_features) and optional 'n_clusters'.
-    Returns a list of cluster assignments for each track.
+    If n_clusters is not provided, it will be determined automatically using silhouette score analysis.
+    Returns a list of cluster assignments for each track and the number of clusters used.
     """
     # Choose features relevant for "vibe" clustering
     feature_keys = [
@@ -252,8 +332,17 @@ async def cluster_playlist_tracks(
     ]
     if not tracks or not isinstance(tracks, list):
         raise HTTPException(status_code=400, detail="Missing or invalid 'tracks' list")
+
+    # Determine optimal n_clusters if not provided
+    if n_clusters is None:
+        print("Auto-determining optimal number of clusters...")
+        n_clusters = determine_optimal_clusters(tracks, feature_keys)
+        print(f"Using {n_clusters} clusters")
+    else:
+        print(f"Using user-specified {n_clusters} clusters")
+
     cluster_ids = cluster_tracks_kmeans(tracks, feature_keys, n_clusters)
-    return JSONResponse({"cluster_ids": cluster_ids})
+    return JSONResponse({"cluster_ids": cluster_ids, "n_clusters": n_clusters})
 
 
 @router.post("/playlist/cluster-names")
@@ -300,7 +389,61 @@ async def get_cluster_vibe_name(cluster_features: dict, representative_tracks: l
         "Guidelines:\n"
         "- Think about what type of person would listen to this, when they'd listen, and how it makes them feel\n"
         "- Use emotional, sensory, or situational words (e.g., 'late night drives', 'focus flow', 'sunset chill')\n"
-        "- Avoid generic terms like 'music', 'songs', 'playlist', or 'cluster'\n"
+        "- Avoid generic terms like 'music', 'songs', 'playlist', 'neon', or 'cluster',\n"
+        "- Examples for the top 20 playlist names with categories:\n"
+        "Deep House Summer\n"
+        "Dance, Deep House, Party\n"
+
+        "Lo-fi Girl – beats to relax/study to\n"
+        "Lo-fi, Chill, Study\n"
+
+        "Dance Fruits – Dance Music to Workout / Party\n"
+        "Dance, Workout, Party\n"
+
+        "Car Music (Future House Cloud)\n"
+        "Driving, Electronic, House\n"
+
+        "Deep House – workout / game / party\n"
+        "Deep House, Workout, Gaming\n"
+
+        "Chillout – We Are Diamond\n"
+        "Chillout, Lounge, Electronic\n"
+
+        "Chill Beats – Relax & Groove\n"
+        "Chill, Lo-fi, Downtempo\n"
+
+        "Trap Nation\n"
+        "Trap, Electronic, Bass\n"
+
+        "CAR MUSIC – Bass Boosted EDM Remix\n"
+        "EDM, Bass Boost, Driving\n"
+
+        "Bass Boosted Car\n"
+        "Bass Boost, EDM, Driving\n"
+
+        "WORKOUT MUSIC – High Energy Gym Songs\n"
+        "Workout, Fitness, High Energy\n"
+
+        "Workout Motivation\n"
+        "Workout, Motivation\n"
+
+        "Billboard Hot 100 (User-curated)\n"
+        "Pop, Charts, Hits\n"
+
+        "Chill House\n"
+        "Chill, House\n"
+
+        "RUNNING Music Hits\n"
+        "Running, Cardio, Fitness\n"
+
+        "Gaming Music Playlist\n"
+        "Gaming, Electronic\n"
+
+        "GYM PHONK – Aggressive Workout Phonk\n"
+        "Phonk, Workout, Aggressive\n"
+
+        "Chill Vibes\n"
+        "Chill, Mood, Vibes\n"
         "- No numbers - use words to distinguish if needed\n"
         "- Keep it under 6 words, ideally 2-4 words\n"
         "- Make it memorable and Spotify-worthy\n\n"

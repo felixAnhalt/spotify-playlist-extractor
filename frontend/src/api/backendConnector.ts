@@ -36,11 +36,11 @@ export const fetchPlaylistTracks = (
 
 /**
  * Clusters tracks by vibe.
+ * The backend automatically determines the optimal number of clusters based on audio feature variance.
  * @param tracks Array of track objects with audio_features
- * @param n_clusters Number of clusters (optional)
  */
-export const clusterTracks = (tracks: any[], n_clusters: number = 4) => {
-  return axios.post(`${PLAYLIST_PATH}/cluster`, { tracks, n_clusters });
+export const clusterTracks = (tracks: any[]) => {
+  return axios.post(`${PLAYLIST_PATH}/cluster`, { tracks });
 };
 
 /**
