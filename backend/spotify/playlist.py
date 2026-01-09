@@ -197,6 +197,7 @@ async def create_playlists(request: Request):
                 json={"name": name, "description": description, "public": public}
             )
             if pl_resp.status_code != 201:
+                print(f"Failed to create playlist '{name}': {pl_resp.status_code} - {pl_resp.text}")
                 continue
             pl_data = pl_resp.json()
             playlist_id = pl_data["id"]
@@ -204,11 +205,13 @@ async def create_playlists(request: Request):
             # Add tracks in batches of 100
             for i in range(0, len(track_ids), 100):
                 batch = track_ids[i:i+100]
-                await client.post(
+                tracks_resp = await client.post(
                     f"{SPOTIFY_API_BASE}/playlists/{playlist_id}/tracks",
                     headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
                     json={"uris": [f"spotify:track:{tid}" for tid in batch]}
                 )
+                if tracks_resp.status_code not in [200, 201]:
+                    print(f"Failed to add tracks to playlist '{name}': {tracks_resp.status_code} - {tracks_resp.text}")
             created.append({"name": name, "url": playlist_url})
     return JSONResponse({"created": created})
 
@@ -292,12 +295,18 @@ async def get_cluster_vibe_name(cluster_features: dict, representative_tracks: l
                 track_names.append(t.get("name", "Unknown"))
 
     prompt = (
-        "Given the following average audio features and a few representative tracks, "
-        "generate a short, creative, and descriptive 'vibe' name for this music cluster (this'll be the new playlists' name). Make them very descriptive and giving people an 'aha, yes that makes sense' moment when hearing the playlist name.\n"
-        "Do not use the word 'cluster' or numbers. Keep it under 5 words.\n"
-        f"Audio features: {cluster_features}\n"
-        f"Representative tracks: {track_names}\n"
-        "Name:"
+        "You are an expert music curator. Given the average audio features and representative tracks below, "
+        "create a catchy, evocative playlist name that perfectly captures the mood, vibe, and atmosphere.\n\n"
+        "Guidelines:\n"
+        "- Think about what type of person would listen to this, when they'd listen, and how it makes them feel\n"
+        "- Use emotional, sensory, or situational words (e.g., 'late night drives', 'focus flow', 'sunset chill')\n"
+        "- Avoid generic terms like 'music', 'songs', 'playlist', or 'cluster'\n"
+        "- No numbers - use words to distinguish if needed\n"
+        "- Keep it under 6 words, ideally 2-4 words\n"
+        "- Make it memorable and Spotify-worthy\n\n"
+        f"Audio Features: {cluster_features}\n"
+        f"Tracks: {', '.join(track_names)}\n\n"
+        "Return ONLY the playlist name, nothing else:"
     )
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
