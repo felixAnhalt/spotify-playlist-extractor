@@ -48,6 +48,28 @@ async def fetch_all_tracks(access_token: str, playlist_id: str) -> List[Dict[str
             params = None  # Only needed for the first request
     return tracks
 
+async def fetch_liked_tracks(access_token: str) -> List[Dict[str, Any]]:
+    """
+    Fetches ALL user's liked songs from Spotify /me/tracks endpoint with pagination.
+    Returns a list of track objects (each item has a 'track' key with the track data).
+    """
+    liked_items = []
+    url = f"{SPOTIFY_API_BASE}/me/tracks"
+    headers = {"Authorization": f"Bearer {access_token}"}
+    params = {"limit": 50, "offset": 0}
+
+    async with httpx.AsyncClient() as client:
+        while url:
+            resp = await client.get(url, headers=headers, params=params)
+            if resp.status_code != 200:
+                raise HTTPException(status_code=resp.status_code, detail="Failed to fetch liked tracks")
+            data = resp.json()
+            liked_items.extend(data.get("items", []))
+            url = data.get("next")
+            params = None  # Only needed for the first request
+
+    return liked_items
+
 async def fetch_audio_features(access_token: str, track_ids: List[str]) -> Dict[str, Any]:
     """
     Fetches audio features for a list of track IDs using Reccobeats API.
@@ -153,68 +175,59 @@ async def get_playlist_tracks(request: Request):
         })
     return JSONResponse({"tracks": result})
 
-@router.post("/playlist/create")
-async def create_playlists(request: Request):
+@router.post("/playlist/liked-tracks")
+async def get_user_liked_tracks(request: Request):
     """
-    Creates new playlists in the user's Spotify account with user-specified names, descriptions, and tracks.
-    Accepts JSON: {
-        "playlists": [
-            {"name": str, "description": str, "tracks": [str, ...]}
-        ],
-        "state": str,
-        "public": bool (optional)
-    }
-    Returns: JSON with confirmation and links to created playlists.
+    Fetches ALL user's liked songs with audio features.
+    Accepts JSON body with 'state' (required).
+    Returns same format as /playlist/tracks endpoint for compatibility with clustering pipeline.
     """
-    body = await request.json()
-    playlists = body.get("playlists")
+    try:
+        body = await request.json()
+        print(f"Request body received: {body}")
+    except Exception as e:
+        print(f"Error parsing request body: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON body")
+    
     state = body.get("state")
-    public = body.get("public", False)
-    if not playlists or not state:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing playlists or state")
+    print(f"State value: {state}")
+
+    if not state:
+        print("State is missing or empty")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing state")
+
     tokens = session_store.get_tokens(state)
     if not tokens or "access_token" not in tokens:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No valid access token for state")
+
     access_token = tokens["access_token"]
 
-    created = []
-    async with httpx.AsyncClient() as client:
-        # Get user ID
-        user_resp = await client.get(f"{SPOTIFY_API_BASE}/me", headers={"Authorization": f"Bearer {access_token}"})
-        if user_resp.status_code != 200:
-            raise HTTPException(status_code=401, detail="Failed to fetch user profile")
-        user_id = user_resp.json()["id"]
+    # Fetch ALL liked tracks
+    print("Fetching all liked tracks...")
+    liked_items = await fetch_liked_tracks(access_token)
+    print(f"Fetched {len(liked_items)} liked items")
 
-        for pl in playlists:
-            name = pl.get("name")
-            description = pl.get("description", "")
-            track_ids = pl.get("tracks", [])
-            if not name or not isinstance(track_ids, list):
-                continue
-            # Create playlist
-            pl_resp = await client.post(
-                f"{SPOTIFY_API_BASE}/users/{user_id}/playlists",
-                headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
-                json={"name": name, "description": description, "public": public}
-            )
-            if pl_resp.status_code != 201:
-                print(f"Failed to create playlist '{name}': {pl_resp.status_code} - {pl_resp.text}")
-                continue
-            pl_data = pl_resp.json()
-            playlist_id = pl_data["id"]
-            playlist_url = pl_data.get("external_urls", {}).get("spotify")
-            # Add tracks in batches of 100
-            for i in range(0, len(track_ids), 100):
-                batch = track_ids[i:i+100]
-                tracks_resp = await client.post(
-                    f"{SPOTIFY_API_BASE}/playlists/{playlist_id}/tracks",
-                    headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
-                    json={"uris": [f"spotify:track:{tid}" for tid in batch]}
-                )
-                if tracks_resp.status_code not in [200, 201]:
-                    print(f"Failed to add tracks to playlist '{name}': {tracks_resp.status_code} - {tracks_resp.text}")
-            created.append({"name": name, "url": playlist_url})
-    return JSONResponse({"created": created})
+    # Extract track IDs
+    track_ids = [item["track"]["id"] for item in liked_items if item.get("track") and item["track"].get("id")]
+    print(f"Extracted {len(track_ids)} track IDs")
+
+    # Fetch audio features
+    audio_features = await fetch_audio_features(access_token, track_ids)
+    print(f"Fetched audio features for {len(audio_features)} tracks")
+
+    # Build result in same format as /playlist/tracks
+    result = []
+    for item in liked_items:
+        track = item.get("track")
+        if not track or not track.get("id"):
+            continue
+        track_id = track["id"]
+        result.append({
+            "track": track,
+            "audio_features": audio_features.get(track_id)
+         })
+    
+    return JSONResponse({"tracks": result})
 
 def normalize_audio_features(tracks: list, feature_keys: list) -> list:
     """
@@ -239,7 +252,7 @@ def determine_optimal_clusters(tracks: list, feature_keys: list, min_clusters: i
         tracks: List of track objects with audio_features
         feature_keys: List of audio feature keys to use for clustering
         min_clusters: Minimum number of clusters to test (default: 3)
-        max_clusters: Maximum number of clusters to test (default: 12)
+        max_clusters: Maximum number of clusters to test (default: 15)
 
     Returns:
         Optimal number of clusters
@@ -252,6 +265,25 @@ def determine_optimal_clusters(tracks: list, feature_keys: list, min_clusters: i
         return 1
     if n_samples < min_clusters:
         return max(2, min(n_samples, 3))
+
+    # Heuristic: playlist size influences cluster range
+    # Small playlists (< 20): 2-4 clusters
+    # Medium playlists (20-50): 3-6 clusters
+    # Large playlists (50-150): 5-10 clusters
+    # Very large playlists (150-400): 8-15 clusters
+    # Massive playlists (400+): 12-25 clusters
+    if n_samples < 20:
+        min_clusters, max_clusters = 2, 4
+    elif n_samples < 50:
+        min_clusters, max_clusters = 3, 6
+    elif n_samples < 150:
+        min_clusters, max_clusters = 5, 10
+    elif n_samples < 400:
+        min_clusters, max_clusters = 8, 15
+    else:
+        # For massive playlists, aim for ~30-50 tracks per cluster
+        min_clusters = max(12, n_samples // 50)
+        max_clusters = min(25, n_samples // 25)
 
     print(f"Playlist size: {n_samples} tracks. Testing {min_clusters}-{max_clusters} clusters")
 

@@ -35,6 +35,14 @@ export const fetchPlaylistTracks = (
 };
 
 /**
+ * Fetches ALL user's liked songs and audio features.
+ * @param state OAuth state string
+ */
+export const fetchLikedTracks = (state: string) => {
+  return axios.post(`${PLAYLIST_PATH}/liked-tracks`, { state });
+};
+
+/**
  * Clusters tracks by vibe.
  * The backend automatically determines the optimal number of clusters based on audio feature variance.
  * @param tracks Array of track objects with audio_features

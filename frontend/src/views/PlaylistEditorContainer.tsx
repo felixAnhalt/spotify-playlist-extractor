@@ -7,6 +7,7 @@
 import React, { useState } from "react";
 import {
   fetchPlaylistTracks,
+  fetchLikedTracks,
   clusterTracks,
   getClusterNames,
   createPlaylists,
@@ -42,6 +43,7 @@ function Modal({
 const PlaylistEditorContainer: React.FC = () => {
   const { state } = useOAuthState();
   const [playlistUrl, setPlaylistUrl] = useState("");
+  const [sourceType, setSourceType] = useState<"playlist" | "liked-tracks">("playlist");
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [discardPool, setDiscardPool] = useState<DiscardPool>({ songs: [] });
   const [loading, setLoading] = useState(false);
@@ -60,24 +62,27 @@ const PlaylistEditorContainer: React.FC = () => {
    */
   const handleOrganize = async () => {
     setLoading(true);
-    setModal({ open: true, message: "Fetching playlist tracks..." });
+    setModal({ open: true, message: "Fetching tracks..." });
     try {
-      // 1. Fetch tracks and audio features
       if (!state) throw new Error("Missing OAuth state. Please log in again.");
-      const tracksResp = await fetchPlaylistTracks(playlistUrl, state);
+
+      let tracksResp;
+      if (sourceType === "playlist") {
+        tracksResp = await fetchPlaylistTracks(playlistUrl, state);
+      } else {
+        tracksResp = await fetchLikedTracks(state);
+      }
+
       const tracksData = tracksResp.data.tracks;
 
       setModal({ open: true, message: "Clustering tracks by vibe..." });
-      // 2. Cluster tracks (n_clusters determined automatically by backend)
       const clusterResp = await clusterTracks(tracksData);
       const clusterIds = clusterResp.data.cluster_ids;
 
       setModal({ open: true, message: "Naming clusters..." });
-      // 3. Get cluster names
       const namesResp = await getClusterNames(tracksData, clusterIds);
       const clusterNames = namesResp.data.cluster_names;
 
-      // 4. Build playlists and discard pool
       const clusterMap: { [cid: string]: Playlist } = {};
       tracksData.forEach((item: any, idx: number) => {
         const cid = clusterIds[idx];
@@ -153,25 +158,67 @@ const PlaylistEditorContainer: React.FC = () => {
             </p>
           </div>
 
-          {/* Input Section */}
-          <div className="flex flex-col sm:flex-row gap-4 mb-8 w-full max-w-2xl">
-            <input
-              type="text"
-              placeholder="Enter Spotify playlist URL or ID"
-              value={playlistUrl}
-              onChange={(e) => setPlaylistUrl(e.target.value)}
-              className="flex-1 px-4 py-3 rounded-xl bg-primary-50 border-2 border-primary-700 text-primary-900 placeholder-primary-400 focus:outline-none focus:border-accent-500 focus:bg-white focus:ring-2 focus:ring-accent-200 transition-all cartoon-input font-medium font-mono shadow-cartoon-xs border-cartoon-2"
+          {/* Source Selection Toggle */}
+          <div className="flex gap-2 mb-8 p-1 bg-primary-100 rounded-full border-2 border-primary-700 shadow-cartoon-sm border-cartoon-2">
+            <button
+              onClick={() => setSourceType("playlist")}
               disabled={loading}
-            />
-            <Button
-              onClick={handleOrganize}
-              disabled={loading || !playlistUrl}
-              variant="spotify"
-              size="large"
+              className={`px-6 py-2 font-bold rounded-full transition-all duration-200 font-mono text-sm ${
+                sourceType === "playlist"
+                  ? "bg-primary-700 text-white shadow-cartoon-xs border-2 border-primary-900 border-cartoon-2"
+                  : "bg-transparent text-primary-900 hover:bg-primary-200"
+              } disabled:opacity-50 disabled:cursor-not-allowed`}
             >
-              {loading ? "PROCESSING..." : "ORGANIZE PLAYLIST"}
-            </Button>
+              🔗 Playlist
+            </button>
+            <button
+              onClick={() => setSourceType("liked-tracks")}
+              disabled={loading}
+              className={`px-6 py-2 font-bold rounded-full transition-all duration-200 font-mono text-sm ${
+                sourceType === "liked-tracks"
+                  ? "bg-accent-500 text-white shadow-cartoon-xs border-2 border-accent-700 border-cartoon-2"
+                  : "bg-transparent text-primary-900 hover:bg-primary-200"
+              } disabled:opacity-50 disabled:cursor-not-allowed`}
+            >
+              ❤️ Liked Songs
+            </button>
           </div>
+
+          {/* Playlist Input */}
+          {sourceType === "playlist" && (
+            <div className="flex flex-col sm:flex-row gap-4 mb-8 w-full max-w-2xl">
+              <input
+                type="text"
+                placeholder="Enter Spotify playlist URL or ID"
+                value={playlistUrl}
+                onChange={(e) => setPlaylistUrl(e.target.value)}
+                className="flex-1 px-4 py-3 rounded-xl bg-primary-50 border-2 border-primary-700 text-primary-900 placeholder-primary-400 focus:outline-none focus:border-accent-500 focus:bg-white focus:ring-2 focus:ring-accent-200 transition-all cartoon-input font-medium font-mono shadow-cartoon-xs border-cartoon-2"
+                disabled={loading}
+              />
+              <Button
+                onClick={handleOrganize}
+                disabled={loading || !playlistUrl}
+                variant="spotify"
+                size="large"
+              >
+                {loading ? "PROCESSING..." : "ORGANIZE PLAYLIST"}
+              </Button>
+            </div>
+          )}
+
+          {/* Liked Songs Input */}
+          {sourceType === "liked-tracks" && (
+            <div className="flex flex-col sm:flex-row gap-4 mb-8 w-full max-w-2xl">
+              <Button
+                onClick={handleOrganize}
+                disabled={loading}
+                variant="spotify"
+                size="large"
+              >
+                {loading ? "PROCESSING..." : "ORGANIZE ALL LIKED SONGS"}
+              </Button>
+            </div>
+          )}
 
           {/* Playlist Editor */}
           {playlists.length > 0 && (
