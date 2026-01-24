@@ -8,8 +8,8 @@ from typing import List, Dict, Any, Optional
 import httpx
 import asyncio
 from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import KMeans, DBSCAN
-from sklearn.metrics import silhouette_score, davies_bouldin_score
+from sklearn.cluster import KMeans
+from sklearn.metrics import davies_bouldin_score
 from collections import defaultdict
 import numpy as np
 
@@ -47,6 +47,28 @@ async def fetch_all_tracks(access_token: str, playlist_id: str) -> List[Dict[str
             url = data.get("next")
             params = None  # Only needed for the first request
     return tracks
+
+async def fetch_liked_tracks(access_token: str) -> List[Dict[str, Any]]:
+    """
+    Fetches ALL user's liked songs from Spotify /me/tracks endpoint with pagination.
+    Returns a list of track objects (each item has a 'track' key with the track data).
+    """
+    liked_items = []
+    url = f"{SPOTIFY_API_BASE}/me/tracks"
+    headers = {"Authorization": f"Bearer {access_token}"}
+    params = {"limit": 50, "offset": 0}
+
+    async with httpx.AsyncClient() as client:
+        while url:
+            resp = await client.get(url, headers=headers, params=params)
+            if resp.status_code != 200:
+                raise HTTPException(status_code=resp.status_code, detail="Failed to fetch liked tracks")
+            data = resp.json()
+            liked_items.extend(data.get("items", []))
+            url = data.get("next")
+            params = None  # Only needed for the first request
+
+    return liked_items
 
 async def fetch_audio_features(access_token: str, track_ids: List[str]) -> Dict[str, Any]:
     """
@@ -153,65 +175,59 @@ async def get_playlist_tracks(request: Request):
         })
     return JSONResponse({"tracks": result})
 
-@router.post("/playlist/create")
-async def create_playlists(request: Request):
+@router.post("/playlist/liked-tracks")
+async def get_user_liked_tracks(request: Request):
     """
-    Creates new playlists in the user's Spotify account with user-specified names, descriptions, and tracks.
-    Accepts JSON: {
-        "playlists": [
-            {"name": str, "description": str, "tracks": [str, ...]}
-        ],
-        "state": str,
-        "public": bool (optional)
-    }
-    Returns: JSON with confirmation and links to created playlists.
+    Fetches ALL user's liked songs with audio features.
+    Accepts JSON body with 'state' (required).
+    Returns same format as /playlist/tracks endpoint for compatibility with clustering pipeline.
     """
-    body = await request.json()
-    playlists = body.get("playlists")
+    try:
+        body = await request.json()
+        print(f"Request body received: {body}")
+    except Exception as e:
+        print(f"Error parsing request body: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON body")
+
     state = body.get("state")
-    public = body.get("public", False)
-    if not playlists or not state:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing playlists or state")
+    print(f"State value: {state}")
+
+    if not state:
+        print("State is missing or empty")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing state")
+
     tokens = session_store.get_tokens(state)
     if not tokens or "access_token" not in tokens:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No valid access token for state")
+
     access_token = tokens["access_token"]
 
-    created = []
-    async with httpx.AsyncClient() as client:
-        # Get user ID
-        user_resp = await client.get(f"{SPOTIFY_API_BASE}/me", headers={"Authorization": f"Bearer {access_token}"})
-        if user_resp.status_code != 200:
-            raise HTTPException(status_code=401, detail="Failed to fetch user profile")
-        user_id = user_resp.json()["id"]
+    # Fetch ALL liked tracks
+    print("Fetching all liked tracks...")
+    liked_items = await fetch_liked_tracks(access_token)
+    print(f"Fetched {len(liked_items)} liked items")
 
-        for pl in playlists:
-            name = pl.get("name")
-            description = pl.get("description", "")
-            track_ids = pl.get("tracks", [])
-            if not name or not isinstance(track_ids, list):
-                continue
-            # Create playlist
-            pl_resp = await client.post(
-                f"{SPOTIFY_API_BASE}/users/{user_id}/playlists",
-                headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
-                json={"name": name, "description": description, "public": public}
-            )
-            if pl_resp.status_code != 201:
-                continue
-            pl_data = pl_resp.json()
-            playlist_id = pl_data["id"]
-            playlist_url = pl_data.get("external_urls", {}).get("spotify")
-            # Add tracks in batches of 100
-            for i in range(0, len(track_ids), 100):
-                batch = track_ids[i:i+100]
-                await client.post(
-                    f"{SPOTIFY_API_BASE}/playlists/{playlist_id}/tracks",
-                    headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
-                    json={"uris": [f"spotify:track:{tid}" for tid in batch]}
-                )
-            created.append({"name": name, "url": playlist_url})
-    return JSONResponse({"created": created})
+    # Extract track IDs
+    track_ids = [item["track"]["id"] for item in liked_items if item.get("track") and item["track"].get("id")]
+    print(f"Extracted {len(track_ids)} track IDs")
+
+    # Fetch audio features
+    audio_features = await fetch_audio_features(access_token, track_ids)
+    print(f"Fetched audio features for {len(audio_features)} tracks")
+
+    # Build result in same format as /playlist/tracks
+    result = []
+    for item in liked_items:
+        track = item.get("track")
+        if not track or not track.get("id"):
+            continue
+        track_id = track["id"]
+        result.append({
+            "track": track,
+            "audio_features": audio_features.get(track_id)
+         })
+
+    return JSONResponse({"tracks": result})
 
 def normalize_audio_features(tracks: list, feature_keys: list, feature_weights: Optional[Dict[str, float]] = None) -> tuple:
     """
@@ -223,179 +239,166 @@ def normalize_audio_features(tracks: list, feature_keys: list, feature_weights: 
     for t in tracks:
         af = t.get("audio_features") or {}
         features.append([af.get(k, 0.0) for k in feature_keys])
-    
+
     scaler = StandardScaler()
-    X_normalized = scaler.fit_transform(features)
-    
-    # Apply feature weighting if provided
-    if feature_weights is not None:
-        weights = np.array([feature_weights.get(k, 1.0) for k in feature_keys])
-        X_normalized = X_normalized * weights
-    
-    return X_normalized, scaler
+    return scaler.fit_transform(features)
 
-def determine_optimal_clusters(X: np.ndarray, min_clusters: int = 2, max_clusters: int = 12) -> int:
+def determine_optimal_clusters(tracks: list, feature_keys: list, min_clusters: int = 3, max_clusters: int = 15) -> int:
     """
-    Determines the optimal number of clusters using silhouette score and elbow method.
-    Balances cluster quality with reasonable cluster sizes.
-    Returns the optimal number of clusters.
+    Determines the optimal number of clusters using a hybrid approach:
+    1. Elbow method with inertia (within-cluster sum of squares)
+    2. Davies-Bouldin score (lower is better - ratio of within to between cluster distances)
+    3. Size-based heuristics for reasonable bounds
+
+    Args:
+        tracks: List of track objects with audio_features
+        feature_keys: List of audio feature keys to use for clustering
+        min_clusters: Minimum number of clusters to test (default: 3)
+        max_clusters: Maximum number of clusters to test (default: 15)
+
+    Returns:
+        Optimal number of clusters
     """
+    X = normalize_audio_features(tracks, feature_keys)
     n_samples = len(X)
-    
-    # Adjust max_clusters based on dataset size
-    # Rule: at least 5 tracks per cluster on average, max 15 clusters
-    max_clusters = min(max_clusters, max(2, n_samples // 5), 15)
-    min_clusters = min(min_clusters, max_clusters)
-    
-    if max_clusters <= min_clusters:
-        return min_clusters
-    
-    silhouette_scores = []
+
+    # Edge cases
+    if n_samples < 2:
+        return 1
+    if n_samples < min_clusters:
+        return max(2, min(n_samples, 3))
+
+    # Heuristic: playlist size influences cluster range
+    # Small playlists (< 20): 2-4 clusters
+    # Medium playlists (20-50): 3-6 clusters
+    # Large playlists (50-150): 5-10 clusters
+    # Very large playlists (150-400): 8-15 clusters
+    # Massive playlists (400+): 12-25 clusters
+    if n_samples < 20:
+        min_clusters, max_clusters = 2, 4
+    elif n_samples < 50:
+        min_clusters, max_clusters = 3, 6
+    elif n_samples < 150:
+        min_clusters, max_clusters = 5, 10
+    elif n_samples < 400:
+        min_clusters, max_clusters = 8, 15
+    else:
+        # For massive playlists, aim for ~30-50 tracks per cluster
+        min_clusters = max(12, n_samples // 50)
+        max_clusters = min(25, n_samples // 25)
+
+    print(f"Playlist size: {n_samples} tracks. Testing {min_clusters}-{max_clusters} clusters")
+
     inertias = []
-    
-    for k in range(min_clusters, max_clusters + 1):
-        kmeans = KMeans(n_clusters=k, n_init='auto', random_state=42, max_iter=300)
-        labels = kmeans.fit_predict(X)
-        
-        # Calculate silhouette score (higher is better, range -1 to 1)
-        sil_score = silhouette_score(X, labels)
-        silhouette_scores.append(sil_score)
-        inertias.append(kmeans.inertia_)
-    
-    # Find optimal k using silhouette score with elbow detection
-    # Prefer higher silhouette scores but penalize too many clusters
-    silhouette_scores = np.array(silhouette_scores)
-    
-    # Normalize inertias for elbow detection
-    inertias = np.array(inertias)
-    normalized_inertias = (inertias - inertias.min()) / (inertias.max() - inertias.min() + 1e-10)
-    
-    # Combined score: prioritize silhouette, but consider elbow
-    # Higher silhouette = better separation, lower inertia drop = diminishing returns
-    combined_scores = silhouette_scores - 0.3 * normalized_inertias
-    
-    optimal_k = int(min_clusters + np.argmax(combined_scores))
-    
-    print(f"Cluster optimization: tested {min_clusters}-{max_clusters}, optimal={optimal_k}")
-    print(f"Silhouette scores: {silhouette_scores}")
-    
-    return optimal_k
+    db_scores = []
+    k_range = range(min_clusters, max_clusters + 1)
 
-def balance_clusters(X: np.ndarray, labels: np.ndarray, min_size: int = 3) -> np.ndarray:
-    """
-    Rebalances clusters by reassigning tracks from oversized clusters to undersized ones.
-    Ensures each cluster has at least min_size tracks.
-    Returns adjusted cluster labels.
-    """
-    labels = labels.copy()
-    unique_labels = np.unique(labels)
-    
-    # Count cluster sizes
-    cluster_sizes = {label: np.sum(labels == label) for label in unique_labels}
-    
-    # Find undersized clusters
-    undersized = [label for label, size in cluster_sizes.items() if size < min_size]
-    
-    if not undersized:
-        return labels
-    
-    # Calculate cluster centroids
-    centroids = {}
-    for label in unique_labels:
-        mask = labels == label
-        centroids[label] = np.mean(X[mask], axis=0)
-    
-    # Reassign tracks from smallest clusters to nearest larger clusters
-    for under_label in undersized:
-        under_mask = labels == under_label
-        under_indices = np.where(under_mask)[0]
-        
-        for idx in under_indices:
-            track_features = X[idx]
-            
-            # Find nearest cluster that isn't undersized
-            distances = {}
-            for label in unique_labels:
-                if label != under_label and cluster_sizes.get(label, 0) >= min_size:
-                    dist = np.linalg.norm(track_features - centroids[label])
-                    distances[label] = dist
-            
-            if distances:
-                nearest_label = min(distances.keys(), key=lambda k: distances[k])
-                labels[idx] = nearest_label
-                cluster_sizes[under_label] -= 1
-                cluster_sizes[nearest_label] += 1
-    
-    return labels
+    # Test different cluster counts
+    for k in k_range:
+        try:
+            kmeans = KMeans(n_clusters=k, n_init='auto', random_state=42)
+            labels = kmeans.fit_predict(X)
 
-def cluster_tracks_adaptive(tracks: list, feature_keys: list, feature_weights: Optional[Dict[str, float]] = None, 
-                            n_clusters: Optional[int] = None, min_cluster_size: int = 3) -> tuple:
+            # Calculate metrics
+            inertia = kmeans.inertia_
+            db_score = davies_bouldin_score(X, labels)
+
+            inertias.append(inertia)
+            db_scores.append(db_score)
+
+            print(f"k={k}: inertia={inertia:.2f}, davies_bouldin={db_score:.3f}")
+        except Exception as e:
+            print(f"Error testing k={k}: {e}")
+            inertias.append(float('inf'))
+            db_scores.append(float('inf'))
+
+    # Find elbow point using rate of change
+    best_k = min_clusters
+    if len(inertias) > 2:
+        # Calculate rate of decrease in inertia
+        deltas = [inertias[i] - inertias[i+1] for i in range(len(inertias)-1)]
+        # Calculate second derivative (rate of change of rate of change)
+        second_deltas = [deltas[i] - deltas[i+1] for i in range(len(deltas)-1)]
+
+        # Find elbow: where improvement rate drops significantly
+        # Combined with Davies-Bouldin score (lower is better)
+        scores = []
+        for i in range(len(second_deltas)):
+            k = min_clusters + i + 1
+            idx = i + 1
+            # Normalize metrics (lower is better for both)
+            # Weight: 60% elbow sharpness, 40% cluster quality
+            elbow_score = second_deltas[i] if second_deltas[i] > 0 else 0
+            db_normalized = 1.0 / (1.0 + db_scores[idx]) if db_scores[idx] != float('inf') else 0
+            combined_score = 0.6 * elbow_score + 0.4 * db_normalized
+            scores.append((k, combined_score))
+            print(f"k={k}: combined_score={combined_score:.3f} (elbow={elbow_score:.3f}, db_norm={db_normalized:.3f})")
+
+        if scores:
+            best_k = max(scores, key=lambda x: x[1])[0]
+
+    print(f"Optimal number of clusters: {best_k}")
+    return best_k
+
+def cluster_tracks_kmeans(tracks: list, feature_keys: list, n_clusters: int = 4) -> list:
     """
     Clusters tracks using adaptive KMeans with optimal cluster count determination.
-    
+
     Args:
         tracks: List of track dicts with audio_features
         feature_keys: List of audio feature keys to use for clustering
         feature_weights: Optional dict of feature_key -> weight (higher = more important)
         n_clusters: Optional fixed number of clusters (if None, will determine automatically)
         min_cluster_size: Minimum tracks per cluster
-    
+
     Returns:
         Tuple of (cluster_ids list, n_clusters used)
     """
     X, scaler = normalize_audio_features(tracks, feature_keys, feature_weights)
-    
+
     # Determine optimal cluster count if not specified
     if n_clusters is None:
         n_clusters = determine_optimal_clusters(X, min_clusters=3, max_clusters=10)
-    
+
     # Ensure n_clusters doesn't exceed track count
     n_clusters = min(n_clusters, len(tracks))
-    
+
     # Perform clustering
     kmeans = KMeans(n_clusters=n_clusters, n_init='auto', random_state=42, max_iter=300)
     labels = kmeans.fit_predict(X)
-    
+
     # Balance clusters to ensure minimum size
     labels = balance_clusters(X, labels, min_size=min_cluster_size)
-    
+
     # Remove empty clusters and renumber
     unique_labels = np.unique(labels)
     label_mapping = {old: new for new, old in enumerate(unique_labels)}
     labels = np.array([label_mapping[label] for label in labels])
-    
+
     actual_n_clusters = len(unique_labels)
-    
+
     print(f"Clustering complete: {actual_n_clusters} clusters created")
     cluster_sizes = [np.sum(labels == i) for i in range(actual_n_clusters)]
     print(f"Cluster sizes: {cluster_sizes}")
-    
+
     return labels.tolist(), actual_n_clusters
 
 @router.post("/playlist/cluster")
 async def cluster_playlist_tracks(
     tracks: list = Body(..., embed=True),
-    n_clusters: Optional[int] = Body(None, embed=True),
-    min_cluster_size: int = Body(3, embed=True)
+    n_clusters: int = Body(None, embed=True)
 ):
     """
-    Accepts a JSON body with 'tracks' (list of track dicts with audio_features), 
-    optional 'n_clusters' (auto-determined if None), and 'min_cluster_size' (default 3).
-    
-    Returns a list of cluster assignments for each track and the actual number of clusters created.
-    
-    The clustering algorithm automatically:
-    - Determines optimal cluster count if not specified
-    - Weights features appropriately (vibe features > technical features)
-    - Ensures balanced cluster sizes
-    - Removes outliers to separate clusters
+    Accepts a JSON body with 'tracks' (list of track dicts with audio_features) and optional 'n_clusters'.
+    If n_clusters is not provided, it will be determined automatically using silhouette score analysis.
+    Returns a list of cluster assignments for each track and the number of clusters used.
     """
     # Choose features relevant for "vibe" clustering with appropriate weights
     feature_keys = [
         "danceability", "energy", "valence", "acousticness",
         "instrumentalness", "liveness", "speechiness", "tempo"
     ]
-    
+
     # Feature weights: emphasize mood/vibe features, de-emphasize technical ones
     feature_weights = {
         "valence": 1.5,        # Happiness/positivity - very important for vibe
@@ -407,30 +410,20 @@ async def cluster_playlist_tracks(
         "speechiness": 0.8,    # Spoken word content
         "liveness": 0.7        # Live recording feel
     }
-    
+
     if not tracks or not isinstance(tracks, list):
         raise HTTPException(status_code=400, detail="Missing or invalid 'tracks' list")
-    
-    if len(tracks) < 6:
-        # Too few tracks to meaningfully cluster
-        return JSONResponse({
-            "cluster_ids": [0] * len(tracks),
-            "n_clusters": 1,
-            "message": "Too few tracks to cluster meaningfully"
-        })
-    
-    cluster_ids, actual_n_clusters = cluster_tracks_adaptive(
-        tracks, 
-        feature_keys, 
-        feature_weights=feature_weights,
-        n_clusters=n_clusters,
-        min_cluster_size=min_cluster_size
-    )
-    
-    return JSONResponse({
-        "cluster_ids": cluster_ids,
-        "n_clusters": actual_n_clusters
-    })
+
+    # Determine optimal n_clusters if not provided
+    if n_clusters is None:
+        print("Auto-determining optimal number of clusters...")
+        n_clusters = determine_optimal_clusters(tracks, feature_keys)
+        print(f"Using {n_clusters} clusters")
+    else:
+        print(f"Using user-specified {n_clusters} clusters")
+
+    cluster_ids = cluster_tracks_kmeans(tracks, feature_keys, n_clusters)
+    return JSONResponse({"cluster_ids": cluster_ids, "n_clusters": n_clusters})
 
 
 @router.post("/playlist/cluster-names")
@@ -472,12 +465,72 @@ async def get_cluster_vibe_name(cluster_features: dict, representative_tracks: l
                 track_names.append(t.get("name", "Unknown"))
 
     prompt = (
-        "Given the following average audio features and a few representative tracks, "
-        "generate a short, creative, and descriptive 'vibe' name for this music cluster (this'll be the new playlists' name). Make them very descriptive and giving people an 'aha, yes that makes sense' moment when hearing the playlist name.\n"
-        "Do not use the word 'cluster' or numbers. Keep it under 5 words.\n"
-        f"Audio features: {cluster_features}\n"
-        f"Representative tracks: {track_names}\n"
-        "Name:"
+        "You are an expert music curator. Given the average audio features and representative tracks below, "
+        "create a catchy, evocative playlist name that perfectly captures the mood, vibe, and atmosphere.\n\n"
+        "Guidelines:\n"
+        "- Think about what type of person would listen to this, when they'd listen, and how it makes them feel\n"
+        "- Use emotional, sensory, or situational words (e.g., 'late night drives', 'focus flow', 'sunset chill')\n"
+        "- Avoid generic terms like 'music', 'songs', 'playlist', 'neon', or 'cluster',\n"
+        "- Examples for the top 20 playlist names with categories:\n"
+        "Deep House Summer\n"
+        "Dance, Deep House, Party\n"
+
+        "Lo-fi Girl – beats to relax/study to\n"
+        "Lo-fi, Chill, Study\n"
+
+        "Dance Fruits – Dance Music to Workout / Party\n"
+        "Dance, Workout, Party\n"
+
+        "Car Music (Future House Cloud)\n"
+        "Driving, Electronic, House\n"
+
+        "Deep House – workout / game / party\n"
+        "Deep House, Workout, Gaming\n"
+
+        "Chillout – We Are Diamond\n"
+        "Chillout, Lounge, Electronic\n"
+
+        "Chill Beats – Relax & Groove\n"
+        "Chill, Lo-fi, Downtempo\n"
+
+        "Trap Nation\n"
+        "Trap, Electronic, Bass\n"
+
+        "CAR MUSIC – Bass Boosted EDM Remix\n"
+        "EDM, Bass Boost, Driving\n"
+
+        "Bass Boosted Car\n"
+        "Bass Boost, EDM, Driving\n"
+
+        "WORKOUT MUSIC – High Energy Gym Songs\n"
+        "Workout, Fitness, High Energy\n"
+
+        "Workout Motivation\n"
+        "Workout, Motivation\n"
+
+        "Billboard Hot 100 (User-curated)\n"
+        "Pop, Charts, Hits\n"
+
+        "Chill House\n"
+        "Chill, House\n"
+
+        "RUNNING Music Hits\n"
+        "Running, Cardio, Fitness\n"
+
+        "Gaming Music Playlist\n"
+        "Gaming, Electronic\n"
+
+        "GYM PHONK – Aggressive Workout Phonk\n"
+        "Phonk, Workout, Aggressive\n"
+
+        "Chill Vibes\n"
+        "Chill, Mood, Vibes\n"
+        "- No numbers - use words to distinguish if needed\n"
+        "- Keep it under 6 words, ideally 2-4 words\n"
+        "- Make it memorable and Spotify-worthy\n\n"
+        f"Audio Features: {cluster_features}\n"
+        f"Tracks: {', '.join(track_names)}\n\n"
+        "Return ONLY the playlist name, nothing else:"
     )
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",

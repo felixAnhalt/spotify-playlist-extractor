@@ -35,12 +35,20 @@ export const fetchPlaylistTracks = (
 };
 
 /**
- * Clusters tracks by vibe.
- * @param tracks Array of track objects with audio_features
- * @param n_clusters Number of clusters (optional)
+ * Fetches ALL user's liked songs and audio features.
+ * @param state OAuth state string
  */
-export const clusterTracks = (tracks: any[], n_clusters: number = 4) => {
-  return axios.post(`${PLAYLIST_PATH}/cluster`, { tracks, n_clusters });
+export const fetchLikedTracks = (state: string) => {
+  return axios.post(`${PLAYLIST_PATH}/liked-tracks`, { state });
+};
+
+/**
+ * Clusters tracks by vibe.
+ * The backend automatically determines the optimal number of clusters based on audio feature variance.
+ * @param tracks Array of track objects with audio_features
+ */
+export const clusterTracks = (tracks: any[]) => {
+  return axios.post(`${PLAYLIST_PATH}/cluster`, { tracks });
 };
 
 /**
