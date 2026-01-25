@@ -131,15 +131,24 @@ export const PlaylistEditor: React.FC<PlaylistEditorProps> = ({
   };
 
   /**
-   * Handles selection/deselection of a playlist.
-   */
-  const handleSelectPlaylist = (playlistId: string) => {
-    setPlaylists((pls) =>
-      pls.map((p) =>
-        p.id === playlistId ? { ...p, selected: !p.selected } : p
-      )
-    );
-  };
+    * Handles selection/deselection of a playlist.
+    * Also toggles the selected state of all songs in the playlist.
+    */
+   const handleSelectPlaylist = (playlistId: string) => {
+     setPlaylists((pls) =>
+       pls.map((p) => {
+         if (p.id === playlistId) {
+           const newSelected = !p.selected;
+           return {
+             ...p,
+             selected: newSelected,
+             songs: p.songs.map((s) => ({ ...s, selected: newSelected })),
+           };
+         }
+         return p;
+       })
+     );
+   };
 
   /**
    * Handles selection/deselection of a song within a playlist.
@@ -252,12 +261,12 @@ export const PlaylistEditor: React.FC<PlaylistEditorProps> = ({
                         className="bg-neutral-50 mb-2 p-2 rounded flex items-center border-2 border-secondary-600 hover:bg-secondary-50 hover:border-secondary-500 transition-all duration-200 cartoon-song shadow-cartoon-song border-cartoon-2"
                       >
                         <input
-                          type="checkbox"
-                          checked={!!song.selected}
-                          onChange={() => handleSelectDiscardPool(song.id)}
-                          className="w-4 h-4 text-secondary-500 rounded focus:ring-2 focus:ring-secondary-300 mr-3 border-2 border-secondary-600"
-                          aria-label={`Select song ${song.title}`}
-                        />
+                           type="checkbox"
+                           checked={!!song.selected}
+                           onChange={() => handleSelectDiscardSong(song.id)}
+                           className="w-4 h-4 text-secondary-500 rounded focus:ring-2 focus:ring-secondary-300 mr-3 border-2 border-secondary-600"
+                           aria-label={`Select song ${song.title}`}
+                         />
                         <span className="text-sm font-medium text-neutral-700 font-mono">
                           {song.title} — {song.artist}
                         </span>
