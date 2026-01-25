@@ -51,49 +51,61 @@ def test_playlist_cluster_missing_tracks():
     assert "detail" in response.json()
 
 def test_create_playlists_flow(monkeypatch):
-    """
-    High-level test for /playlist/create endpoint: creates playlists and adds tracks.
-    """
-    # Patch Spotify API calls to avoid real HTTP requests
-    class DummyResp:
-        def __init__(self, status_code, json_data):
-            self.status_code = status_code
-            self._json = json_data
-        def json(self):
-            return self._json
+     """
+     High-level test for /playlist/create endpoint: creates playlists and adds tracks.
+     """
+     # Patch Spotify API calls to avoid real HTTP requests
+     class DummyResp:
+         def __init__(self, status_code, json_data):
+             self.status_code = status_code
+             self._json = json_data
+         def json(self):
+             return self._json
 
-    async def dummy_get(url, headers=None):
-        if url.endswith("/me"):
-            return DummyResp(200, {"id": "user123"})
-        return DummyResp(404, {})
-    async def dummy_post(url, headers=None, json=None):
-        if "users/user123/playlists" in url:
-            return DummyResp(201, {"id": "plid1", "external_urls": {"spotify": "https://open.spotify.com/playlist/plid1"}})
-        if "playlists/plid1/tracks" in url:
-            return DummyResp(201, {})
-        return DummyResp(404, {})
+     async def dummy_get(url, headers=None):
+         if url.endswith("/me"):
+             return DummyResp(200, {"id": "user123"})
+         return DummyResp(404, {})
+     
+     async def dummy_post(url, headers=None, json=None):
+         if "users/user123/playlists" in url:
+             return DummyResp(201, {"id": "plid1", "external_urls": {"spotify": "https://open.spotify.com/playlist/plid1"}})
+         if "playlists/plid1/tracks" in url:
+             return DummyResp(201, {})
+         return DummyResp(404, {})
 
-    import spotify.playlist as playlist_mod
-    monkeypatch.setattr(playlist_mod.httpx.AsyncClient, "get", staticmethod(dummy_get))
-    monkeypatch.setattr(playlist_mod.httpx.AsyncClient, "post", staticmethod(dummy_post))
+     class DummyClient:
+         """Mock AsyncClient that implements context manager protocol."""
+         async def __aenter__(self):
+             return self
+         async def __aexit__(self, *args):
+             pass
+         async def get(self, url, headers=None):
+             return await dummy_get(url, headers)
+         async def post(self, url, headers=None, json=None):
+             return await dummy_post(url, headers, json)
 
-    # Patch session_store to provide a fake token
-    monkeypatch.setattr(playlist_mod.session_store, "get_tokens", lambda state: {"access_token": "FAKE_TOKEN"})
+     import spotify.playlist as playlist_mod
+     # Patch httpx.AsyncClient constructor to return our mock
+     monkeypatch.setattr(playlist_mod.httpx, "AsyncClient", lambda **kwargs: DummyClient())
 
-    client = TestClient(app)
-    payload = {
-        "playlists": [
-            {"name": "Test Playlist", "description": "desc", "tracks": ["t1", "t2"]}
-        ],
-        "state": "dummy_state",
-        "public": True
-    }
-    resp = client.post("/playlist/create", json=payload)
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "created" in data
-    assert data["created"][0]["name"] == "Test Playlist"
-    assert data["created"][0]["url"].startswith("https://open.spotify.com/playlist/")
+     # Patch session_store to provide a fake token
+     monkeypatch.setattr(playlist_mod.session_store, "get_tokens", lambda state: {"access_token": "FAKE_TOKEN"})
+
+     client = TestClient(app)
+     payload = {
+         "playlists": [
+             {"name": "Test Playlist", "description": "desc", "tracks": ["t1", "t2"]}
+         ],
+         "state": "dummy_state",
+         "public": True
+     }
+     resp = client.post("/playlist/create", json=payload)
+     assert resp.status_code == 200
+     data = resp.json()
+     assert "created" in data
+     assert data["created"][0]["name"] == "Test Playlist"
+     assert data["created"][0]["url"].startswith("https://open.spotify.com/playlist/")
 
 
 def test_playlist_cluster_names(monkeypatch):

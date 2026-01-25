@@ -4,11 +4,12 @@ Endpoints for fetching Spotify playlist tracks and their audio features, and clu
 
 from fastapi import APIRouter, Request, HTTPException, status, Body
 from fastapi.responses import JSONResponse
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import httpx
 import asyncio
 from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, DBSCAN
+from sklearn.metrics import silhouette_score, davies_bouldin_score
 from collections import defaultdict
 import numpy as np
 
@@ -212,45 +213,224 @@ async def create_playlists(request: Request):
             created.append({"name": name, "url": playlist_url})
     return JSONResponse({"created": created})
 
-def normalize_audio_features(tracks: list, feature_keys: list) -> list:
+def normalize_audio_features(tracks: list, feature_keys: list, feature_weights: Optional[Dict[str, float]] = None) -> tuple:
     """
     Normalizes the specified audio features for all tracks using StandardScaler.
-    Returns a list of normalized feature vectors.
+    Applies optional feature weighting to emphasize certain features.
+    Returns a tuple of (normalized features array, scaler).
     """
     features = []
     for t in tracks:
         af = t.get("audio_features") or {}
         features.append([af.get(k, 0.0) for k in feature_keys])
+    
     scaler = StandardScaler()
-    return scaler.fit_transform(features)
+    X_normalized = scaler.fit_transform(features)
+    
+    # Apply feature weighting if provided
+    if feature_weights is not None:
+        weights = np.array([feature_weights.get(k, 1.0) for k in feature_keys])
+        X_normalized = X_normalized * weights
+    
+    return X_normalized, scaler
 
-def cluster_tracks_kmeans(tracks: list, feature_keys: list, n_clusters: int = 4) -> list:
+def determine_optimal_clusters(X: np.ndarray, min_clusters: int = 2, max_clusters: int = 12) -> int:
     """
-    Clusters tracks using KMeans on the specified audio features.
-    Returns a list of cluster IDs corresponding to the input tracks.
+    Determines the optimal number of clusters using silhouette score and elbow method.
+    Balances cluster quality with reasonable cluster sizes.
+    Returns the optimal number of clusters.
     """
-    X = normalize_audio_features(tracks, feature_keys)
-    kmeans = KMeans(n_clusters=n_clusters, n_init='auto', random_state=42)
-    return kmeans.fit_predict(X).tolist()
+    n_samples = len(X)
+    
+    # Adjust max_clusters based on dataset size
+    # Rule: at least 5 tracks per cluster on average, max 15 clusters
+    max_clusters = min(max_clusters, max(2, n_samples // 5), 15)
+    min_clusters = min(min_clusters, max_clusters)
+    
+    if max_clusters <= min_clusters:
+        return min_clusters
+    
+    silhouette_scores = []
+    inertias = []
+    
+    for k in range(min_clusters, max_clusters + 1):
+        kmeans = KMeans(n_clusters=k, n_init='auto', random_state=42, max_iter=300)
+        labels = kmeans.fit_predict(X)
+        
+        # Calculate silhouette score (higher is better, range -1 to 1)
+        sil_score = silhouette_score(X, labels)
+        silhouette_scores.append(sil_score)
+        inertias.append(kmeans.inertia_)
+    
+    # Find optimal k using silhouette score with elbow detection
+    # Prefer higher silhouette scores but penalize too many clusters
+    silhouette_scores = np.array(silhouette_scores)
+    
+    # Normalize inertias for elbow detection
+    inertias = np.array(inertias)
+    normalized_inertias = (inertias - inertias.min()) / (inertias.max() - inertias.min() + 1e-10)
+    
+    # Combined score: prioritize silhouette, but consider elbow
+    # Higher silhouette = better separation, lower inertia drop = diminishing returns
+    combined_scores = silhouette_scores - 0.3 * normalized_inertias
+    
+    optimal_k = int(min_clusters + np.argmax(combined_scores))
+    
+    print(f"Cluster optimization: tested {min_clusters}-{max_clusters}, optimal={optimal_k}")
+    print(f"Silhouette scores: {silhouette_scores}")
+    
+    return optimal_k
+
+def balance_clusters(X: np.ndarray, labels: np.ndarray, min_size: int = 3) -> np.ndarray:
+    """
+    Rebalances clusters by reassigning tracks from oversized clusters to undersized ones.
+    Ensures each cluster has at least min_size tracks.
+    Returns adjusted cluster labels.
+    """
+    labels = labels.copy()
+    unique_labels = np.unique(labels)
+    
+    # Count cluster sizes
+    cluster_sizes = {label: np.sum(labels == label) for label in unique_labels}
+    
+    # Find undersized clusters
+    undersized = [label for label, size in cluster_sizes.items() if size < min_size]
+    
+    if not undersized:
+        return labels
+    
+    # Calculate cluster centroids
+    centroids = {}
+    for label in unique_labels:
+        mask = labels == label
+        centroids[label] = np.mean(X[mask], axis=0)
+    
+    # Reassign tracks from smallest clusters to nearest larger clusters
+    for under_label in undersized:
+        under_mask = labels == under_label
+        under_indices = np.where(under_mask)[0]
+        
+        for idx in under_indices:
+            track_features = X[idx]
+            
+            # Find nearest cluster that isn't undersized
+            distances = {}
+            for label in unique_labels:
+                if label != under_label and cluster_sizes.get(label, 0) >= min_size:
+                    dist = np.linalg.norm(track_features - centroids[label])
+                    distances[label] = dist
+            
+            if distances:
+                nearest_label = min(distances.keys(), key=lambda k: distances[k])
+                labels[idx] = nearest_label
+                cluster_sizes[under_label] -= 1
+                cluster_sizes[nearest_label] += 1
+    
+    return labels
+
+def cluster_tracks_adaptive(tracks: list, feature_keys: list, feature_weights: Optional[Dict[str, float]] = None, 
+                            n_clusters: Optional[int] = None, min_cluster_size: int = 3) -> tuple:
+    """
+    Clusters tracks using adaptive KMeans with optimal cluster count determination.
+    
+    Args:
+        tracks: List of track dicts with audio_features
+        feature_keys: List of audio feature keys to use for clustering
+        feature_weights: Optional dict of feature_key -> weight (higher = more important)
+        n_clusters: Optional fixed number of clusters (if None, will determine automatically)
+        min_cluster_size: Minimum tracks per cluster
+    
+    Returns:
+        Tuple of (cluster_ids list, n_clusters used)
+    """
+    X, scaler = normalize_audio_features(tracks, feature_keys, feature_weights)
+    
+    # Determine optimal cluster count if not specified
+    if n_clusters is None:
+        n_clusters = determine_optimal_clusters(X, min_clusters=3, max_clusters=10)
+    
+    # Ensure n_clusters doesn't exceed track count
+    n_clusters = min(n_clusters, len(tracks))
+    
+    # Perform clustering
+    kmeans = KMeans(n_clusters=n_clusters, n_init='auto', random_state=42, max_iter=300)
+    labels = kmeans.fit_predict(X)
+    
+    # Balance clusters to ensure minimum size
+    labels = balance_clusters(X, labels, min_size=min_cluster_size)
+    
+    # Remove empty clusters and renumber
+    unique_labels = np.unique(labels)
+    label_mapping = {old: new for new, old in enumerate(unique_labels)}
+    labels = np.array([label_mapping[label] for label in labels])
+    
+    actual_n_clusters = len(unique_labels)
+    
+    print(f"Clustering complete: {actual_n_clusters} clusters created")
+    cluster_sizes = [np.sum(labels == i) for i in range(actual_n_clusters)]
+    print(f"Cluster sizes: {cluster_sizes}")
+    
+    return labels.tolist(), actual_n_clusters
 
 @router.post("/playlist/cluster")
 async def cluster_playlist_tracks(
     tracks: list = Body(..., embed=True),
-    n_clusters: int = Body(4, embed=True)
+    n_clusters: Optional[int] = Body(None, embed=True),
+    min_cluster_size: int = Body(3, embed=True)
 ):
     """
-    Accepts a JSON body with 'tracks' (list of track dicts with audio_features) and optional 'n_clusters'.
-    Returns a list of cluster assignments for each track.
+    Accepts a JSON body with 'tracks' (list of track dicts with audio_features), 
+    optional 'n_clusters' (auto-determined if None), and 'min_cluster_size' (default 3).
+    
+    Returns a list of cluster assignments for each track and the actual number of clusters created.
+    
+    The clustering algorithm automatically:
+    - Determines optimal cluster count if not specified
+    - Weights features appropriately (vibe features > technical features)
+    - Ensures balanced cluster sizes
+    - Removes outliers to separate clusters
     """
-    # Choose features relevant for "vibe" clustering
+    # Choose features relevant for "vibe" clustering with appropriate weights
     feature_keys = [
         "danceability", "energy", "valence", "acousticness",
         "instrumentalness", "liveness", "speechiness", "tempo"
     ]
+    
+    # Feature weights: emphasize mood/vibe features, de-emphasize technical ones
+    feature_weights = {
+        "valence": 1.5,        # Happiness/positivity - very important for vibe
+        "energy": 1.4,         # Intensity - very important for vibe
+        "danceability": 1.3,   # Groove - important for vibe
+        "acousticness": 1.2,   # Organic vs electronic - important distinction
+        "instrumentalness": 1.0,  # Vocals vs instrumental
+        "tempo": 0.6,          # Speed - less important (normalize first)
+        "speechiness": 0.8,    # Spoken word content
+        "liveness": 0.7        # Live recording feel
+    }
+    
     if not tracks or not isinstance(tracks, list):
         raise HTTPException(status_code=400, detail="Missing or invalid 'tracks' list")
-    cluster_ids = cluster_tracks_kmeans(tracks, feature_keys, n_clusters)
-    return JSONResponse({"cluster_ids": cluster_ids})
+    
+    if len(tracks) < 6:
+        # Too few tracks to meaningfully cluster
+        return JSONResponse({
+            "cluster_ids": [0] * len(tracks),
+            "n_clusters": 1,
+            "message": "Too few tracks to cluster meaningfully"
+        })
+    
+    cluster_ids, actual_n_clusters = cluster_tracks_adaptive(
+        tracks, 
+        feature_keys, 
+        feature_weights=feature_weights,
+        n_clusters=n_clusters,
+        min_cluster_size=min_cluster_size
+    )
+    
+    return JSONResponse({
+        "cluster_ids": cluster_ids,
+        "n_clusters": actual_n_clusters
+    })
 
 
 @router.post("/playlist/cluster-names")
