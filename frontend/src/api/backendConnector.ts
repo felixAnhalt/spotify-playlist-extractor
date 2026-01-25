@@ -77,3 +77,28 @@ export const createPlaylists = (
     public: publicFlag,
   });
 };
+
+/**
+ * Generates a curated playlist from a reference playlist using AI.
+ * @param referencePlaylistUrl Reference playlist ID or URL
+ * @param newPlaylistName Name/theme for the new playlist
+ * @param state OAuth state string
+ * @param songLimit Optional number of songs (default 20)
+ */
+export const generatePlaylistFromReference = (
+  referencePlaylistUrl: string,
+  newPlaylistName: string,
+  state: string,
+  songLimit?: number
+) => {
+  const playlist_id = referencePlaylistUrl.includes("playlist/")
+    ? referencePlaylistUrl.split("playlist/")[1].split("?")[0]
+    : referencePlaylistUrl;
+    
+  return axios.post(`${PLAYLIST_PATH}/generate-from-reference`, {
+    state,
+    reference_playlist_id: playlist_id,
+    new_playlist_name: newPlaylistName,
+    song_limit: songLimit || 20,
+  });
+};

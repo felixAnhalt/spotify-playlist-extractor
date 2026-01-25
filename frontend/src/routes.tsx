@@ -6,6 +6,7 @@ import LandingPage from "./views/LandingPage";
 import OAuthCallback from "./views/OAuthCallback";
 import LoggedIn from "./views/LoggedIn";
 import PlaylistEditorContainer from "./views/PlaylistEditorContainer";
+import GeneratePlaylistPage from "./views/GeneratePlaylistPage";
 
 /**
  * AppRoutes component.
@@ -28,6 +29,10 @@ const generateAppRoutes = () => {
     {
       path: "/organize",
       element: <PlaylistEditorContainer />,
+    },
+    {
+      path: "/generate",
+      element: <GeneratePlaylistPage />,
     },
     {
       path: "/auth/callback",

@@ -1,7 +1,3 @@
-// LandingPage.tsx
-// Landing page with "Login with Spotify" button.
-// Initiates OAuth flow by calling backend login endpoint.
-
 import * as React from "react";
 import { login } from "../api/backendConnector";
 import Container from "../components/Container";
@@ -31,7 +27,7 @@ function LandingPage(): React.ReactElement {
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-primary-50 via-accent-50 to-secondary-50 relative">
+    <main className="min-h-screen bg-linear-to-br from-primary-50 via-accent-50 to-secondary-50 relative">
       <Container>
         {/* Hero Section */}
         <section className="flex flex-col items-center pt-16 pb-12 text-center">
@@ -117,7 +113,7 @@ function FeatureItem({
 }): React.ReactElement {
   return (
     <div className="flex gap-4 items-start bg-primary-50 p-4 rounded-lg border-2 border-primary-700 shadow-cartoon-sm border-cartoon-2">
-      <div className="text-3xl text-accent-500 flex-shrink-0 font-bold font-mono">✓</div>
+      <div className="text-3xl text-accent-500 shrink-0 font-bold font-mono">✓</div>
       <div>
         <h3 className="m-0 mb-2 text-xl text-primary-900 font-black font-mono letter-spacing-cartoon">
           {title}

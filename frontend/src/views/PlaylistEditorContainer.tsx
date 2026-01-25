@@ -5,6 +5,7 @@
  */
 
 import React, { useState } from "react";
+import { useNavigate } from "react-router";
 import {
   fetchPlaylistTracks,
   fetchLikedTracks,
@@ -16,31 +17,13 @@ import PlaylistEditor, { Playlist, DiscardPool } from "./PlaylistEditor";
 import { useOAuthState } from "../auth/OAuthStateContext";
 import Container from "../components/Container";
 import Button from "../components/Button";
-
-/**
- * Modal component for feedback.
- */
-function Modal({
-  open,
-  children,
-}: {
-  open: boolean;
-  children: React.ReactNode;
-}) {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 bg-neutral-900/30 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="bg-primary-50 p-8 rounded-xl min-w-80 max-w-md shadow-2xl border-primary-700 cartoon-card border-cartoon-3 shadow-cartoon">
-        {children}
-      </div>
-    </div>
-  );
-}
+import Modal from "../components/Modal";
 
 /**
  * PlaylistEditorContainer component.
  */
 const PlaylistEditorContainer: React.FC = () => {
+  const navigate = useNavigate();
   const { state } = useOAuthState();
   const [playlistUrl, setPlaylistUrl] = useState("");
   const [sourceType, setSourceType] = useState<"playlist" | "liked-tracks">("playlist");
@@ -144,19 +127,36 @@ const PlaylistEditorContainer: React.FC = () => {
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-primary-50 via-accent-50 to-secondary-100">
+    <main className="min-h-screen bg-linear-to-br from-primary-50 via-accent-50 to-secondary-100">
       <Container>
         <div className="flex flex-col items-center justify-center min-h-screen py-12">
-          {/* Header */}
-          <div className="text-center mb-12">
-            <div className="text-6xl mb-4 animate-bounce" style={{ animationDuration: '2s' }}>🎵</div>
-            <h1 className="text-5xl font-black text-primary-900 mb-6 font-mono-bold text-shadow-cartoon letter-spacing-cartoon-lg">
-              ORGANIZE YOUR PLAYLIST
-            </h1>
-            <p className="text-xl text-primary-800 max-w-2xl bg-primary-100 p-4 rounded-lg border-2 border-primary-700 font-medium shadow-cartoon-sm border-cartoon-2">
-              Enter your Spotify playlist URL or ID to start organizing your music by vibe, mood, and energy!
-            </p>
-          </div>
+           {/* Header */}
+           <div className="text-center mb-12">
+             <div className="text-6xl mb-4 animate-bounce" style={{ animationDuration: '2s' }}>🎵</div>
+             <h1 className="text-5xl font-black text-primary-900 mb-6 font-mono-bold text-shadow-cartoon letter-spacing-cartoon-lg">
+               ORGANIZE YOUR PLAYLIST
+             </h1>
+             <p className="text-xl text-primary-800 max-w-2xl bg-primary-100 p-4 rounded-lg border-2 border-primary-700 font-medium shadow-cartoon-sm border-cartoon-2">
+               Enter your Spotify playlist URL or ID to start organizing your music by vibe, mood, and energy!
+             </p>
+
+             {/* Feature Toggle Navigation */}
+             <div className="mt-6 flex gap-4 justify-center">
+               <button
+                 onClick={() => {}}
+                 disabled
+                 className="px-6 py-2 font-bold rounded-full bg-accent-500 text-white border-2 border-accent-700 border-cartoon-2 shadow-cartoon-xs cursor-default opacity-100"
+               >
+                 📂 Organize Playlists
+               </button>
+               <button
+                 onClick={() => navigate("/generate")}
+                 className="px-6 py-2 font-bold rounded-full bg-primary-100 text-primary-900 border-2 border-primary-700 border-cartoon-2 shadow-cartoon-xs hover:bg-primary-200 transition-all font-mono"
+               >
+                 🤖 AI Generator
+               </button>
+             </div>
+           </div>
 
           {/* Source Selection Toggle */}
           <div className="flex gap-2 mb-8 p-1 bg-primary-100 rounded-full border-2 border-primary-700 shadow-cartoon-sm border-cartoon-2">

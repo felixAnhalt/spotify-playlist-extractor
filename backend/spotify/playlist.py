@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from typing import List, Dict, Any, Optional
 import httpx
 import asyncio
+import json
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans, DBSCAN
 from sklearn.metrics import silhouette_score, davies_bouldin_score
@@ -189,19 +190,24 @@ async def create_playlists(request: Request):
             name = pl.get("name")
             description = pl.get("description", "")
             track_ids = pl.get("tracks", [])
+            
             if not name or not isinstance(track_ids, list):
                 continue
+            
             # Create playlist
             pl_resp = await client.post(
                 f"{SPOTIFY_API_BASE}/users/{user_id}/playlists",
                 headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
                 json={"name": name, "description": description, "public": public}
             )
+            
             if pl_resp.status_code != 201:
                 continue
+            
             pl_data = pl_resp.json()
             playlist_id = pl_data["id"]
             playlist_url = pl_data.get("external_urls", {}).get("spotify")
+            
             # Add tracks in batches of 100
             for i in range(0, len(track_ids), 100):
                 batch = track_ids[i:i+100]
@@ -210,7 +216,9 @@ async def create_playlists(request: Request):
                     headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
                     json={"uris": [f"spotify:track:{tid}" for tid in batch]}
                 )
+            
             created.append({"name": name, "url": playlist_url})
+    
     return JSONResponse({"created": created})
 
 def normalize_audio_features(tracks: list, feature_keys: list, feature_weights: Optional[Dict[str, float]] = None) -> tuple:
@@ -499,24 +507,376 @@ async def get_cluster_vibe_name(cluster_features: dict, representative_tracks: l
 
 
 def compute_cluster_averages(tracks: list, feature_keys: list, cluster_ids: list) -> dict:
-    """
-    Computes average audio features and selects representative tracks for each cluster.
-    Returns a dict: cluster_id -> {"features": avg_features, "tracks": [track, ...]}
-    """
-    clusters = defaultdict(list)
-    for idx, cid in enumerate(cluster_ids):
-        clusters[cid].append(tracks[idx])
-    result = {}
-    for cid, tlist in clusters.items():
-        feats = []
-        for t in tlist:
-            af = t.get("audio_features")
-            if af is None:
-                # Handle missing audio features with zeros
-                feats.append([0.0 for _ in feature_keys])
-            else:
-                feats.append([af.get(k, 0.0) for k in feature_keys])
-        avg = dict(zip(feature_keys, np.mean(feats, axis=0)))
-        reps = tlist[:3]  # first 3 as representatives
-        result[cid] = {"features": avg, "tracks": reps}
-    return result
+     """
+     Computes average audio features and selects representative tracks for each cluster.
+     Returns a dict: cluster_id -> {"features": avg_features, "tracks": [track, ...]}
+     """
+     clusters = defaultdict(list)
+     for idx, cid in enumerate(cluster_ids):
+         clusters[cid].append(tracks[idx])
+     result = {}
+     for cid, tlist in clusters.items():
+         feats = []
+         for t in tlist:
+             af = t.get("audio_features")
+             if af is None:
+                 # Handle missing audio features with zeros
+                 feats.append([0.0 for _ in feature_keys])
+             else:
+                 feats.append([af.get(k, 0.0) for k in feature_keys])
+         avg = dict(zip(feature_keys, np.mean(feats, axis=0)))
+         reps = tlist[:3]  # first 3 as representatives
+         result[cid] = {"features": avg, "tracks": reps}
+     return result
+
+def compute_reference_profile(tracks: list, feature_keys: list, feature_weights: dict) -> dict:
+     """
+     Computes weighted average audio features for a reference playlist.
+     Uses feature weights to emphasize vibe-relevant features.
+     """
+     # First compute unweighted averages for each feature
+     feature_values = {k: [] for k in feature_keys}
+     
+     for t in tracks:
+         af = t.get("audio_features")
+         if af is None:
+             af = {}
+         for k in feature_keys:
+             feature_values[k].append(af.get(k, 0.0))
+     
+     # Compute mean for each feature
+     avg_features = {}
+     for k in feature_keys:
+         if feature_values[k]:
+             avg_features[k] = float(np.mean(feature_values[k]))
+         else:
+             avg_features[k] = 0.0
+     
+     # Apply weights to the averaged features
+     weighted_avg = {}
+     for k in feature_keys:
+         weight = feature_weights.get(k, 1.0)
+         weighted_avg[k] = avg_features[k] * weight
+     
+     return weighted_avg
+
+def compute_fit_score(track_features: dict, avg_features: dict, feature_keys: list) -> float:
+     """
+     Computes how well a track fits the average profile (0-1 scale).
+     Uses Euclidean distance in normalized feature space.
+     """
+     if not track_features:
+         return 0.0
+     
+     distances = []
+     for key in feature_keys:
+         if key == "tempo":
+             # Normalize tempo separately (typically 60-200 BPM)
+             track_val = (track_features.get(key, 0) - 60) / 140 if track_features.get(key) else 0
+             avg_val = (avg_features.get(key, 0) - 60) / 140 if avg_features.get(key) else 0
+         else:
+             # Other features already 0-1 scale
+             track_val = track_features.get(key, 0)
+             avg_val = avg_features.get(key, 0)
+         
+         distances.append(abs(float(track_val) - float(avg_val)))
+     
+     avg_distance = float(np.mean(distances))
+     fit_score = max(0.0, 1.0 - avg_distance)  # Convert distance to similarity
+     
+     return fit_score
+
+def fallback_algorithmic_selection(
+     tracks_with_features: list,
+     avg_features: dict,
+     feature_keys: list,
+     song_limit: int
+) -> dict:
+     """
+     Fallback selection when LLM fails: picks songs with highest fit scores.
+     Ensures diversity by limiting songs per artist.
+     """
+     # Compute fit scores for all tracks
+     tracks_with_scores = []
+     for t in tracks_with_features:
+         score = compute_fit_score(t.get("audio_features") or {}, avg_features, feature_keys)
+         # Safely extract artist name
+         artists = t["track"].get("artists", [])
+         artist_key = artists[0]["name"] if artists else "Unknown"
+         tracks_with_scores.append({
+             "track": t["track"],
+             "audio_features": t.get("audio_features"),
+             "fit_score": score,
+             "artist": artist_key
+         })
+     
+     # Sort by fit score (descending)
+     tracks_with_scores.sort(key=lambda x: x["fit_score"], reverse=True)
+     
+     # Select top N with artist diversity constraint
+     selected = []
+     artist_counts: Dict[str, int] = {}
+     max_per_artist = 3
+     
+     for t in tracks_with_scores:
+         if len(selected) >= song_limit:
+             break
+         
+         artist = t["artist"]
+         current_count = artist_counts.get(artist, 0)
+         if current_count < max_per_artist:
+             selected.append({
+                 "track": t["track"],
+                 "audio_features": t["audio_features"],
+                 "fit_score": round(t["fit_score"], 2)
+             })
+             artist_counts[artist] = current_count + 1
+     
+     return {
+         "recommended_tracks": selected,
+         "playlist_profile": avg_features,
+         "llm_reasoning": "Algorithmic selection based on audio feature similarity (LLM unavailable)",
+         "method": "algorithmic"
+     }
+
+async def select_songs_with_llm(
+     tracks_with_features: list,
+     new_playlist_name: str,
+     avg_features: dict,
+     feature_keys: list,
+     song_limit: int
+) -> dict:
+     """
+     Uses LLM to select the most fitting songs from a reference playlist
+     for a new themed playlist.
+     
+     Considers:
+     - Audio feature similarity to reference profile
+     - Thematic fit with new playlist name
+     - Artist/album diversity
+     """
+     # Limit tracks sent to LLM to avoid token overflow (max 80 tracks)
+     tracks_subset = tracks_with_features[:80]
+     
+     # Prepare track summaries for LLM
+     track_summaries = []
+     for idx, t in enumerate(tracks_subset):
+         af = t.get("audio_features") or {}
+         # Safely extract artist name
+         artists = t["track"].get("artists", [])
+         artist_name = artists[0]["name"] if artists else "Unknown"
+         # Safely extract album name
+         album_obj = t["track"].get("album")
+         album_name = album_obj.get("name", "Unknown") if isinstance(album_obj, dict) else "Unknown"
+         track_summaries.append({
+             "index": idx,
+             "name": t["track"]["name"],
+             "artist": artist_name,
+             "album": album_name,
+             "features": {k: round(af.get(k, 0), 2) for k in feature_keys}
+         })
+     
+     # Build LLM prompt
+     prompt = f"""You are an expert music curator creating the perfect playlist.
+
+TASK: Select {song_limit} songs from the reference playlist that best fit the new playlist theme.
+
+NEW PLAYLIST NAME: "{new_playlist_name}"
+
+REFERENCE PLAYLIST AUDIO PROFILE (weighted averages):
+{json.dumps({k: round(v, 2) for k, v in avg_features.items()}, indent=2)}
+
+AVAILABLE TRACKS (max 50 shown):
+{json.dumps(track_summaries[:50], indent=2)}
+
+SELECTION CRITERIA:
+1. Consider what "{new_playlist_name}" suggests (mood, activity, time of day, energy level)
+2. Prioritize songs that match the reference playlist's sonic characteristics
+3. Ensure diversity: max 2-3 songs per artist
+4. Balance variety with coherence
+
+RESPOND IN VALID JSON (no markdown):
+{{
+  "selected_indices": [0, 5, 12, ...],
+  "reasoning": "Brief explanation of why these songs fit the theme"
+}}
+
+Select exactly {song_limit} songs (or fewer if insufficient matches)."""
+     
+     # Call OpenRouter API
+     headers = {
+         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+         "Content-Type": "application/json"
+     }
+     
+     payload = {
+         "model": "xiaomi/mimo-v2-flash:free",
+         "messages": [
+             {
+                 "role": "system",
+                 "content": "You are a professional music curator. Always respond with valid JSON only."
+             },
+             {
+                 "role": "user",
+                 "content": prompt
+             }
+         ],
+         "temperature": 0.75,
+         "max_tokens": 800
+     }
+     
+     async with httpx.AsyncClient(timeout=30.0) as client:
+         try:
+             resp = await client.post(OPENROUTER_API_URL, headers=headers, json=payload)
+             
+             if resp.status_code != 200:
+                 print(f"LLM API error: {resp.status_code} - {resp.text}")
+                 return fallback_algorithmic_selection(
+                     tracks_with_features,
+                     avg_features,
+                     feature_keys,
+                     song_limit
+                 )
+             
+             result = resp.json()
+         except Exception as e:
+             print(f"LLM request failed: {str(e)}")
+             return fallback_algorithmic_selection(
+                 tracks_with_features,
+                 avg_features,
+                 feature_keys,
+                 song_limit
+             )
+     
+     # Parse LLM response (handle markdown code blocks)
+     llm_content = result["choices"][0]["message"]["content"].strip()
+     llm_content = llm_content.replace("```json", "").replace("```", "").strip()
+     
+     try:
+         llm_output = json.loads(llm_content)
+     except json.JSONDecodeError:
+         print(f"Failed to parse LLM response: {llm_content}")
+         return fallback_algorithmic_selection(
+             tracks_with_features,
+             avg_features,
+             feature_keys,
+             song_limit
+         )
+     
+     # Build response with selected tracks
+     selected_indices = llm_output.get("selected_indices", [])
+     recommended_tracks = []
+     
+     for idx in selected_indices:
+         if idx < len(tracks_with_features):
+             track = tracks_with_features[idx]
+             fit_score = compute_fit_score(
+                 track.get("audio_features") or {},
+                 avg_features,
+                 feature_keys
+             )
+             
+             recommended_tracks.append({
+                 "track": track["track"],
+                 "audio_features": track.get("audio_features"),
+                 "fit_score": round(fit_score, 2)
+             })
+     
+     return {
+         "recommended_tracks": recommended_tracks,
+         "playlist_profile": avg_features,
+         "llm_reasoning": llm_output.get("reasoning", ""),
+         "method": "llm"
+     }
+
+@router.post("/playlist/generate-from-reference")
+async def generate_playlist_from_reference(request: Request):
+     """
+     Generates a curated playlist by analyzing a reference playlist's audio features
+     and selecting the most fitting songs based on a new playlist name/theme.
+     
+     Uses LLM to intelligently select songs that match both:
+     1. The reference playlist's sonic characteristics (audio features)
+     2. The thematic context of the new playlist name
+     
+     Request body:
+     {
+         "state": "oauth_state_token",
+         "reference_playlist_id": "37i9dQZF1DXcBWIGoYBM5M",
+         "new_playlist_name": "Late Night Coding",
+         "song_limit": 25  // optional, default 20
+     }
+     """
+     body = await request.json()
+     state = body.get("state")
+     reference_playlist_id = body.get("reference_playlist_id")
+     new_playlist_name = body.get("new_playlist_name")
+     song_limit = body.get("song_limit", 20)
+     
+     # Validation
+     if not all([state, reference_playlist_id, new_playlist_name]):
+         raise HTTPException(status_code=400, detail="Missing required fields: state, reference_playlist_id, new_playlist_name")
+     
+     tokens = session_store.get_tokens(state)
+     if not tokens or "access_token" not in tokens:
+         raise HTTPException(status_code=401, detail="No valid access token")
+     
+     access_token = tokens["access_token"]
+     playlist_id = extract_playlist_id(reference_playlist_id)
+     
+     try:
+         # 1. Fetch reference playlist tracks + audio features
+         tracks = await fetch_all_tracks(access_token, playlist_id)
+         track_ids = [item["track"]["id"] for item in tracks if item.get("track") and item["track"].get("id")]
+         
+         if len(track_ids) < 10:
+             raise HTTPException(status_code=400, detail="Reference playlist must have at least 10 tracks")
+         
+         audio_features = await fetch_audio_features(access_token, track_ids)
+         
+         tracks_with_features = []
+         for item in tracks:
+             track = item.get("track")
+             if not track or not track.get("id"):
+                 continue
+             tracks_with_features.append({
+                 "track": track,
+                 "audio_features": audio_features.get(track["id"])
+             })
+         
+         # 2. Analyze reference playlist audio profile
+         feature_keys = [
+             "danceability", "energy", "valence", "acousticness",
+             "instrumentalness", "liveness", "speechiness", "tempo"
+         ]
+         
+         feature_weights = {
+             "valence": 1.5,
+             "energy": 1.4,
+             "danceability": 1.3,
+             "acousticness": 1.2,
+             "instrumentalness": 1.0,
+             "tempo": 0.6,
+             "speechiness": 0.8,
+             "liveness": 0.7
+         }
+         
+         avg_features = compute_reference_profile(tracks_with_features, feature_keys, feature_weights)
+         
+         # 3. Call LLM to select fitting songs
+         recommendations = await select_songs_with_llm(
+             tracks_with_features,
+             new_playlist_name,
+             avg_features,
+             feature_keys,
+             song_limit
+         )
+         
+         return JSONResponse(recommendations)
+     
+     except HTTPException:
+         raise
+     except Exception as e:
+         print(f"Error in generate_playlist_from_reference: {str(e)}")
+         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
